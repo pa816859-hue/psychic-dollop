@@ -15,6 +15,7 @@ class Game(db.Model):
     modes_raw = db.Column(db.Text, default="[]")
     genres_raw = db.Column(db.Text, default="[]")
     steam_app_id = db.Column(db.String(32), nullable=True)
+    icon_url = db.Column(db.String(512), nullable=True)
     elo_rating = db.Column(db.Float, nullable=False, default=1500.0)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
@@ -26,6 +27,7 @@ class Game(db.Model):
             "modes": self.modes,
             "genres": self.genres,
             "steam_app_id": self.steam_app_id,
+            "icon_url": self.icon_url,
             "elo_rating": self.elo_rating,
             "created_at": self.created_at.isoformat(),
         }
