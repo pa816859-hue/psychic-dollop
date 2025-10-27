@@ -1,0 +1,500 @@
+from __future__ import annotations
+
+import random
+from datetime import datetime
+from itertools import combinations
+from typing import Iterable, Tuple
+
+import requests
+from flask import Blueprint, jsonify, render_template, request
+from sqlalchemy import or_
+
+from . import db
+from .models import Comparison, Game, SessionLog
+
+bp = Blueprint("core", __name__)
+
+
+@bp.route("/")
+def index():
+    return render_template("index.html")
+
+
+def _validate_status(status: str) -> str:
+    allowed = {"backlog", "wishlist"}
+    if status not in allowed:
+        raise ValueError(f"Status must be one of {', '.join(sorted(allowed))}.")
+    return status
+
+
+@bp.route("/api/games", methods=["GET", "POST"])
+def games_collection():
+    if request.method == "POST":
+        payload = request.get_json(force=True)
+        title = (payload.get("title") or "").strip()
+        status = (payload.get("status") or "").strip().lower()
+        steam_app_id = (payload.get("steam_app_id") or "").strip() or None
+        modes = payload.get("modes") or []
+        genres = payload.get("genres") or []
+
+        if not title:
+            return jsonify({"error": "Title is required."}), 400
+
+        try:
+            _validate_status(status)
+        except ValueError as exc:  # pragma: no cover - defensive
+            return jsonify({"error": str(exc)}), 400
+
+        if Game.query.filter_by(title=title).first():
+            return jsonify({"error": "Game with this title already exists."}), 400
+
+        game = Game(title=title, status=status, steam_app_id=steam_app_id)
+        game.modes = [m.strip() for m in modes if m.strip()]
+        game.genres = [g.strip() for g in genres if g.strip()]
+
+        db.session.add(game)
+        db.session.commit()
+
+        return jsonify(game.to_dict()), 201
+
+    games = Game.query.order_by(Game.title.asc()).all()
+    return jsonify([game.to_dict() for game in games])
+
+
+@bp.route("/api/games/<int:game_id>", methods=["PUT", "DELETE"])
+def games_resource(game_id: int):
+    game = Game.query.get_or_404(game_id)
+
+    if request.method == "DELETE":
+        SessionLog.query.filter_by(game_id=game.id).update({SessionLog.game_id: None})
+        Comparison.query.filter(
+            (Comparison.game_a_id == game.id) | (Comparison.game_b_id == game.id)
+        ).delete(synchronize_session=False)
+        db.session.delete(game)
+        db.session.commit()
+        return jsonify({"message": "Game deleted."})
+
+    payload = request.get_json(force=True)
+    title = (payload.get("title") or game.title).strip()
+    status = (payload.get("status") or game.status).strip().lower()
+    steam_app_id = (payload.get("steam_app_id") or "").strip() or None
+    modes = payload.get("modes") or game.modes
+    genres = payload.get("genres") or game.genres
+
+    if not title:
+        return jsonify({"error": "Title is required."}), 400
+
+    try:
+        _validate_status(status)
+    except ValueError as exc:  # pragma: no cover - defensive
+        return jsonify({"error": str(exc)}), 400
+
+    if title != game.title and Game.query.filter_by(title=title).first():
+        return jsonify({"error": "Another game with this title already exists."}), 400
+
+    game.title = title
+    game.status = status
+    game.steam_app_id = steam_app_id
+    game.modes = [m.strip() for m in modes if m.strip()]
+    game.genres = [g.strip() for g in genres if g.strip()]
+
+    db.session.commit()
+
+    return jsonify(game.to_dict())
+
+
+def _available_pairs(games: Iterable[Game], status: str) -> list[Tuple[Game, Game]]:
+    existing_pairs = {
+        tuple(sorted((comp.game_a_id, comp.game_b_id)))
+        for comp in Comparison.query.filter_by(status=status).all()
+    }
+
+    candidates = []
+    game_list = list(games)
+    for game_a, game_b in combinations(game_list, 2):
+        pair_key = tuple(sorted((game_a.id, game_b.id)))
+        if pair_key not in existing_pairs:
+            candidates.append((game_a, game_b))
+    return candidates
+
+
+def _elo_expected(rating_a: float, rating_b: float) -> float:
+    return 1.0 / (1.0 + 10 ** ((rating_b - rating_a) / 400))
+
+
+def _update_elo(game_a: Game, game_b: Game, winner_id: int, k_factor: float = 32.0) -> None:
+    expected_a = _elo_expected(game_a.elo_rating, game_b.elo_rating)
+    expected_b = _elo_expected(game_b.elo_rating, game_a.elo_rating)
+
+    if winner_id == game_a.id:
+        score_a, score_b = 1.0, 0.0
+    else:
+        score_a, score_b = 0.0, 1.0
+
+    game_a.elo_rating += k_factor * (score_a - expected_a)
+    game_b.elo_rating += k_factor * (score_b - expected_b)
+
+
+@bp.route("/api/rankings/<status>/pair")
+def ranking_pair(status: str):
+    try:
+        normalized_status = _validate_status(status)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    games = Game.query.filter_by(status=normalized_status).all()
+    if len(games) < 2:
+        return jsonify({"error": "Add more games to start comparisons."}), 400
+
+    candidates = _available_pairs(games, normalized_status)
+    if not candidates:
+        return jsonify({"message": "All possible pairs have been compared."})
+
+    game_a, game_b = random.choice(candidates)
+    return jsonify({"game_a": game_a.to_dict(), "game_b": game_b.to_dict()})
+
+
+@bp.route("/api/rankings/<status>/compare", methods=["POST"])
+def submit_comparison(status: str):
+    try:
+        normalized_status = _validate_status(status)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    payload = request.get_json(force=True)
+    try:
+        game_a_id = int(payload.get("game_a_id"))
+        game_b_id = int(payload.get("game_b_id"))
+        winner_id = int(payload.get("winner_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid comparison payload."}), 400
+
+    if winner_id not in {game_a_id, game_b_id}:
+        return jsonify({"error": "Winner must be one of the compared games."}), 400
+
+    game_a = Game.query.get_or_404(game_a_id)
+    game_b = Game.query.get_or_404(game_b_id)
+
+    pair_key = tuple(sorted((game_a.id, game_b.id)))
+
+    existing = Comparison.query.filter_by(
+        status=normalized_status, game_a_id=pair_key[0], game_b_id=pair_key[1]
+    ).first()
+    if existing and existing.winner_id is not None:
+        return jsonify({"error": "This pair has already been compared."}), 400
+
+    if existing is None:
+        comparison = Comparison(
+            status=normalized_status,
+            game_a_id=pair_key[0],
+            game_b_id=pair_key[1],
+            winner_id=winner_id,
+        )
+        db.session.add(comparison)
+    else:
+        existing.winner_id = winner_id
+
+    _update_elo(game_a, game_b, winner_id)
+    db.session.commit()
+
+    return jsonify({"message": "Comparison recorded."})
+
+
+@bp.route("/api/rankings/<status>")
+def ranking_table(status: str):
+    try:
+        normalized_status = _validate_status(status)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    games = (
+        Game.query.filter_by(status=normalized_status)
+        .order_by(Game.elo_rating.desc())
+        .all()
+    )
+    return jsonify([game.to_dict() for game in games])
+
+
+@bp.route("/api/sessions", methods=["GET", "POST"])
+def sessions_collection():
+    if request.method == "POST":
+        payload = request.get_json(force=True)
+        game_id_raw = payload.get("game_id")
+        game_id = None
+        if game_id_raw not in (None, ""):
+            try:
+                game_id = int(game_id_raw)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid game identifier."}), 400
+
+        game_title = (payload.get("game_title") or "").strip()
+        session_date_raw = payload.get("session_date")
+
+        try:
+            playtime_minutes = int(payload.get("playtime_minutes"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "Playtime must be a positive number of minutes."}), 400
+
+        sentiment = (payload.get("sentiment") or "").strip().lower()
+        comment = (payload.get("comment") or "").strip() or None
+
+        if not game_title:
+            return jsonify({"error": "Game title is required."}), 400
+
+        if sentiment not in {"good", "mediocre", "bad"}:
+            return jsonify({"error": "Sentiment must be good, mediocre, or bad."}), 400
+
+        try:
+            session_date = datetime.fromisoformat(session_date_raw).date()
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid session date."}), 400
+
+        if playtime_minutes <= 0:
+            return jsonify({"error": "Playtime must be a positive number of minutes."}), 400
+
+        if game_id is not None:
+            game = Game.query.get(game_id)
+            if game:
+                game_title = game.title
+
+        session = SessionLog(
+            game_id=game_id,
+            game_title=game_title,
+            session_date=session_date,
+            playtime_minutes=playtime_minutes,
+            sentiment=sentiment,
+            comment=comment,
+        )
+
+        db.session.add(session)
+        db.session.commit()
+
+        return jsonify(session.to_dict()), 201
+
+    sessions = SessionLog.query.order_by(SessionLog.session_date.desc()).all()
+    return jsonify([session.to_dict() for session in sessions])
+
+
+@bp.route("/api/sessions/<int:session_id>", methods=["DELETE"])
+def delete_session(session_id: int):
+    session = SessionLog.query.get_or_404(session_id)
+    db.session.delete(session)
+    db.session.commit()
+    return jsonify({"message": "Session deleted."})
+
+
+@bp.route("/api/steam/<app_id>")
+def steam_lookup(app_id: str):
+    url = "https://store.steampowered.com/api/appdetails"
+    try:
+        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Steam API request failed: {exc}"}), 502
+
+    return jsonify(payload.get(app_id) or payload)
+
+
+def _resolve_steam_id(steam_id: str, api_key: str | None = None) -> str:
+    steam_id = (steam_id or "").strip()
+    if not steam_id:
+        raise ValueError("Steam ID is required.")
+
+    if steam_id.isdigit():
+        return steam_id
+
+    if not api_key:
+        raise ValueError("Steam API key is required to resolve a vanity URL.")
+
+    url = "https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/"
+    response = requests.get(
+        url,
+        params={"key": api_key, "vanityurl": steam_id},
+        timeout=10,
+    )
+    response.raise_for_status()
+    try:
+        payload = response.json().get("response", {})
+    except ValueError as exc:
+        raise ValueError("Unexpected response while resolving Steam ID.") from exc
+    if payload.get("success") != 1 or not payload.get("steamid"):
+        raise ValueError("Unable to resolve vanity Steam URL.")
+
+    return str(payload["steamid"])
+
+
+def _import_games(entries: list[dict], status: str) -> tuple[list[Game], int]:
+    imported: list[Game] = []
+    skipped = 0
+
+    for entry in entries:
+        name = (entry.get("name") or "").strip()
+        app_id = entry.get("appid")
+        if not name or not app_id:
+            skipped += 1
+            continue
+
+        existing = Game.query.filter(
+            or_(Game.steam_app_id == str(app_id), Game.title == name)
+        ).first()
+        if existing:
+            skipped += 1
+            continue
+
+        game = Game(title=name, status=status, steam_app_id=str(app_id))
+        db.session.add(game)
+        imported.append(game)
+
+    if imported:
+        db.session.flush()
+
+    return imported, skipped
+
+
+@bp.route("/api/steam/import/library", methods=["POST"])
+def import_steam_library():
+    payload = request.get_json(force=True)
+    steam_id_input = (payload.get("steam_id") or "").strip()
+    api_key = (payload.get("api_key") or "").strip()
+    status = (payload.get("status") or "backlog").strip().lower()
+
+    try:
+        normalized_status = _validate_status(status)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    if not api_key:
+        return jsonify({"error": "Steam Web API key is required."}), 400
+
+    try:
+        steam_id = _resolve_steam_id(steam_id_input, api_key)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Steam API request failed: {exc}"}), 502
+
+    url = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+    try:
+        response = requests.get(
+            url,
+            params={
+                "key": api_key,
+                "steamid": steam_id,
+                "include_appinfo": 1,
+                "include_played_free_games": 1,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json().get("response", {})
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Steam API request failed: {exc}"}), 502
+
+    games = data.get("games") or []
+    imported, skipped = _import_games(games, normalized_status)
+
+    if imported:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return (
+        jsonify(
+            {
+                "resolved_steam_id": steam_id,
+                "imported_count": len(imported),
+                "skipped_count": skipped,
+                "imported": [game.to_dict() for game in imported],
+            }
+        ),
+        200,
+    )
+
+
+def _fetch_wishlist_entries(steam_id: str) -> list[dict]:
+    url = f"https://store.steampowered.com/wishlist/profiles/{steam_id}/wishlistdata/"
+    entries: list[dict] = []
+    page = 0
+
+    while True:
+        response = requests.get(url, params={"p": page}, timeout=15)
+        response.raise_for_status()
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ValueError("Unexpected response while fetching wishlist.") from exc
+
+        if not data:
+            break
+
+        if isinstance(data, dict) and data.get("success") == 2:
+            raise ValueError("Wishlist is private or unavailable.")
+
+        page_entries = []
+        for app_id, info in data.items():
+            if not isinstance(info, dict):
+                continue
+            name = info.get("name")
+            if not name:
+                continue
+            try:
+                normalized_app_id = int(app_id)
+            except (TypeError, ValueError):
+                continue
+            page_entries.append({"appid": normalized_app_id, "name": name})
+
+        entries.extend(page_entries)
+
+        if len(data) < 50:
+            break
+        page += 1
+
+    return entries
+
+
+@bp.route("/api/steam/import/wishlist", methods=["POST"])
+def import_steam_wishlist():
+    payload = request.get_json(force=True)
+    steam_id_input = (payload.get("steam_id") or "").strip()
+    api_key = (payload.get("api_key") or "").strip() or None
+    status = (payload.get("status") or "wishlist").strip().lower()
+
+    try:
+        normalized_status = _validate_status(status)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    try:
+        steam_id = _resolve_steam_id(steam_id_input, api_key)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Steam API request failed: {exc}"}), 502
+
+    try:
+        entries = _fetch_wishlist_entries(steam_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except requests.RequestException as exc:
+        return jsonify({"error": f"Steam API request failed: {exc}"}), 502
+
+    imported, skipped = _import_games(entries, normalized_status)
+
+    if imported:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return (
+        jsonify(
+            {
+                "resolved_steam_id": steam_id,
+                "imported_count": len(imported),
+                "skipped_count": skipped,
+                "imported": [game.to_dict() for game in imported],
+            }
+        ),
+        200,
+    )
+

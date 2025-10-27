@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Game Backlog Companion</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="steam-surface">
+    <header class="steam-header">
+      <nav class="top-bar">
+        <div class="brand">Deck Commander</div>
+        <ul class="nav-links">
+          <li><a href="#add-game">Add Games</a></li>
+          <li><a href="#lists">Library</a></li>
+          <li><a href="#elo">ELO</a></li>
+          <li><a href="#sessions">Sessions</a></li>
+          <li><a href="#steam-tools">Steam</a></li>
+        </ul>
+      </nav>
+      <div class="hero">
+        <div class="hero-text">
+          <p class="eyebrow">Game backlog companion</p>
+          <h1>Queue up your next adventure</h1>
+          <p>
+            Import from Steam, track every session, and let ELO-style matchups surface the next game
+            you should play.
+          </p>
+        </div>
+        <div class="hero-cta">
+          <a class="primary" href="#add-game">Start adding games</a>
+          <a class="secondary" href="#steam-tools">Sync with Steam</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="steam-main">
+      <section class="panel" id="add-game">
+        <div class="panel-heading">
+          <h2>Add a game</h2>
+          <p>Tag play styles, genres, and track where it lives.</p>
+        </div>
+        <form id="add-game-form">
+          <div class="field">
+            <label for="title">Title</label>
+            <input id="title" name="title" type="text" required />
+          </div>
+          <div class="field">
+            <label for="status">List</label>
+            <select id="status" name="status">
+              <option value="backlog">Backlog</option>
+              <option value="wishlist">Wishlist</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="steam-app-id">Steam App ID (optional)</label>
+            <input id="steam-app-id" name="steam_app_id" type="text" />
+          </div>
+          <fieldset>
+            <legend>Play styles</legend>
+            <div class="checkboxes">
+              <label><input type="checkbox" value="Single Player" class="mode-option" /> Single Player</label>
+              <label><input type="checkbox" value="Co-op" class="mode-option" /> Co-op</label>
+              <label><input type="checkbox" value="Multiplayer" class="mode-option" /> Multiplayer</label>
+            </div>
+          </fieldset>
+          <div class="field">
+            <label for="genres">Genres (comma separated)</label>
+            <input id="genres" name="genres" type="text" placeholder="RPG, Puzzle" />
+          </div>
+          <button type="submit">Add game</button>
+          <p class="hint" id="game-form-message"></p>
+        </form>
+      </section>
+
+      <section class="panel" id="lists">
+        <div class="panel-heading">
+          <h2>Current games</h2>
+          <p>Browse and manage everything in your backlog and wishlist.</p>
+        </div>
+        <div class="columns">
+          <div>
+            <h3>Backlog</h3>
+            <ul id="backlog-list" class="game-list"></ul>
+          </div>
+          <div>
+            <h3>Wishlist</h3>
+            <ul id="wishlist-list" class="game-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="elo">
+        <div class="panel-heading">
+          <h2>Pairwise ELO ranking</h2>
+          <p>Each matchup is unique, ensuring balanced comparisons.</p>
+        </div>
+        <div class="columns">
+          <div class="elo-panel">
+            <h3>Backlog</h3>
+            <button class="pair-btn" data-status="backlog">Get pair</button>
+            <div class="pair" id="backlog-pair"></div>
+          </div>
+          <div class="elo-panel">
+            <h3>Wishlist</h3>
+            <button class="pair-btn" data-status="wishlist">Get pair</button>
+            <div class="pair" id="wishlist-pair"></div>
+          </div>
+        </div>
+        <div class="columns">
+          <div>
+            <h3>Backlog ranking</h3>
+            <ol id="backlog-ranking" class="ranking"></ol>
+          </div>
+          <div>
+            <h3>Wishlist ranking</h3>
+            <ol id="wishlist-ranking" class="ranking"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="sessions">
+        <div class="panel-heading">
+          <h2>Session log</h2>
+          <p>Capture when you played, how long, and how it felt.</p>
+        </div>
+        <form id="session-form">
+          <div class="field">
+            <label for="session-game">Game</label>
+            <input id="session-game" name="game_title" type="text" list="game-titles" required />
+            <datalist id="game-titles"></datalist>
+          </div>
+          <div class="field">
+            <label for="session-date">Date</label>
+            <input id="session-date" name="session_date" type="date" required />
+          </div>
+          <div class="field">
+            <label for="session-playtime">Playtime (minutes)</label>
+            <input id="session-playtime" name="playtime_minutes" type="number" min="1" required />
+          </div>
+          <fieldset>
+            <legend>Session quality</legend>
+            <div class="radio-group">
+              <label><input type="radio" name="sentiment" value="good" required /> Good</label>
+              <label><input type="radio" name="sentiment" value="mediocre" /> Mediocre</label>
+              <label><input type="radio" name="sentiment" value="bad" /> Bad</label>
+            </div>
+          </fieldset>
+          <div class="field">
+            <label for="session-comment">Comments</label>
+            <textarea id="session-comment" name="comment" rows="3"></textarea>
+          </div>
+          <button type="submit">Log session</button>
+          <p class="hint" id="session-form-message"></p>
+        </form>
+        <table id="sessions-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Game</th>
+              <th>Playtime</th>
+              <th>Sentiment</th>
+              <th>Comment</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="panel" id="steam-tools">
+        <div class="panel-heading">
+          <h2>Steam tools</h2>
+          <p>Pull in owned titles or wishlists and inspect app details.</p>
+        </div>
+        <div class="columns">
+          <div>
+            <h3>Lookup by App ID</h3>
+            <form id="steam-form">
+              <div class="field">
+                <label for="steam-search-id">Steam App ID</label>
+                <input id="steam-search-id" type="text" placeholder="570" />
+              </div>
+              <button type="submit">Fetch details</button>
+            </form>
+            <pre id="steam-result" class="steam-result"></pre>
+          </div>
+          <div>
+            <h3>Import owned games</h3>
+            <form id="library-import-form">
+              <div class="field">
+                <label for="library-steam-id">Steam ID or vanity URL</label>
+                <input
+                  id="library-steam-id"
+                  name="steam_id"
+                  type="text"
+                  placeholder="7656119... or vanity"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="library-api-key">Steam Web API key</label>
+                <input
+                  id="library-api-key"
+                  name="api_key"
+                  type="text"
+                  placeholder="Your API key"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="library-status">Import to list</label>
+                <select id="library-status" name="status">
+                  <option value="backlog">Backlog</option>
+                  <option value="wishlist">Wishlist</option>
+                </select>
+              </div>
+              <button type="submit">Import library</button>
+            </form>
+            <p class="hint" id="library-import-result"></p>
+            <h3>Import wishlist</h3>
+            <form id="wishlist-import-form">
+              <div class="field">
+                <label for="wishlist-steam-id">Steam ID or vanity URL</label>
+                <input
+                  id="wishlist-steam-id"
+                  name="steam_id"
+                  type="text"
+                  placeholder="7656119... or vanity"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="wishlist-api-key">Steam Web API key (optional)</label>
+                <input
+                  id="wishlist-api-key"
+                  name="api_key"
+                  type="text"
+                  placeholder="Needed for vanity IDs"
+                />
+              </div>
+              <div class="field">
+                <label for="wishlist-status">Import to list</label>
+                <select id="wishlist-status" name="status">
+                  <option value="wishlist">Wishlist</option>
+                  <option value="backlog">Backlog</option>
+                </select>
+              </div>
+              <button type="submit">Import wishlist</button>
+            </form>
+            <p class="hint" id="wishlist-import-result"></p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="steam-footer">
+      <p>Crafted with a SteamOS-inspired interface to keep your queue fresh.</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </body>
+</html>

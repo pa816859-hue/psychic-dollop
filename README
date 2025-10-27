@@ -1,1 +1,46 @@
+# Game Backlog Companion
 
+A lightweight Flask web application for tracking a game backlog and wishlist, running pairwise ELO comparisons to decide what to play (or buy) next, and logging play sessions. Steam Store API integration helps pull metadata for titles by App ID.
+
+## Features
+
+- **Backlog & wishlist management** – add games with modes (single-player, co-op, etc.), genres, and optional Steam App ID.
+- **Pairwise ELO ranking** – compare two randomly selected games without repeats to produce a prioritized order for backlog and wishlist.
+- **Session tracking** – log play sessions with date, playtime minutes, sentiment (good/mediocre/bad), and free-form comments.
+- **Steam integrations** – fetch details for a Steam title by App ID and bulk-import games from your Steam library or wishlist.
+
+## Getting started
+
+1. Create and activate a virtual environment (optional but recommended):
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Install dependencies:
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Run the development server:
+
+   ```bash
+   flask --app run.py --debug run
+   ```
+
+   The application is available at <http://localhost:5000>.
+
+## Usage tips
+
+- When you add a game it automatically appears in the backlog or wishlist panel along with its ELO score.
+- Use the **Get pair** buttons to trigger a comparison; each unique pair is presented only once, ensuring balanced ranking input.
+- Session entries can be tied to existing games (via the autocomplete list) or free-form titles.
+- Steam lookups call the public `store.steampowered.com` API; the raw JSON response is rendered so you can copy any details you need.
+- Library and wishlist imports require your Steam Web API key and Steam ID (or vanity URL). Wishlist imports work for public wishlists;
+  provide an API key if you need vanity URL resolution.
+
+## Data storage
+
+The project uses a local SQLite database (`data.db`) created automatically on first run. Delete the file if you want to reset all data.
