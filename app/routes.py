@@ -15,6 +15,14 @@ from .models import Comparison, Game, SessionLog
 bp = Blueprint("core", __name__)
 
 
+class SteamMetadataError(Exception):
+    """Raised when Steam metadata could not be retrieved."""
+
+    def __init__(self, message: str, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @bp.route("/")
 def index():
     return render_template("index.html")
@@ -27,6 +35,64 @@ def _validate_status(status: str) -> str:
     return status
 
 
+def _fetch_steam_metadata(app_id: str) -> tuple[list[str], str | None]:
+    app_id = (app_id or "").strip()
+    if not app_id:
+        return [], None
+
+    url = "https://store.steampowered.com/api/appdetails"
+    try:
+        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise SteamMetadataError(f"Steam API request failed: {exc}", 502) from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SteamMetadataError("Invalid response from Steam API.", 502) from exc
+
+    entry = payload.get(str(app_id))
+    if not entry or not entry.get("success"):
+        raise SteamMetadataError("Steam did not return details for that App ID.")
+
+    data = entry.get("data") or {}
+
+    genres: list[str] = []
+    for genre in data.get("genres") or []:
+        if not isinstance(genre, dict):
+            continue
+        description = (genre.get("description") or "").strip()
+        if description:
+            genres.append(description)
+
+    icon_url = (
+        data.get("header_image")
+        or data.get("capsule_image")
+        or data.get("capsule_imagev5")
+    )
+    if not icon_url:
+        icon_hash = (data.get("img_icon_url") or "").strip()
+        if icon_hash:
+            icon_url = (
+                "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/"
+                f"{app_id}/{icon_hash}.jpg"
+            )
+
+    return genres, icon_url
+
+
+def _apply_steam_metadata(game: Game, app_id: str | None) -> None:
+    if not app_id:
+        game.genres = []
+        game.icon_url = None
+        return
+
+    genres, icon_url = _fetch_steam_metadata(app_id)
+    game.genres = genres
+    game.icon_url = icon_url
+
+
 @bp.route("/api/games", methods=["GET", "POST"])
 def games_collection():
     if request.method == "POST":
@@ -35,7 +101,6 @@ def games_collection():
         status = (payload.get("status") or "").strip().lower()
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
         modes = payload.get("modes") or []
-        genres = payload.get("genres") or []
 
         if not title:
             return jsonify({"error": "Title is required."}), 400
@@ -50,7 +115,15 @@ def games_collection():
 
         game = Game(title=title, status=status, steam_app_id=steam_app_id)
         game.modes = [m.strip() for m in modes if m.strip()]
-        game.genres = [g.strip() for g in genres if g.strip()]
+
+        if steam_app_id:
+            try:
+                _apply_steam_metadata(game, steam_app_id)
+            except SteamMetadataError as exc:
+                return jsonify({"error": str(exc)}), exc.status_code
+        else:
+            game.genres = []
+            game.icon_url = None
 
         db.session.add(game)
         db.session.commit()
@@ -77,9 +150,11 @@ def games_resource(game_id: int):
     payload = request.get_json(force=True)
     title = (payload.get("title") or game.title).strip()
     status = (payload.get("status") or game.status).strip().lower()
-    steam_app_id = (payload.get("steam_app_id") or "").strip() or None
+    if "steam_app_id" in payload:
+        steam_app_id = (payload.get("steam_app_id") or "").strip() or None
+    else:
+        steam_app_id = game.steam_app_id
     modes = payload.get("modes") or game.modes
-    genres = payload.get("genres") or game.genres
 
     if not title:
         return jsonify({"error": "Title is required."}), 400
@@ -92,11 +167,25 @@ def games_resource(game_id: int):
     if title != game.title and Game.query.filter_by(title=title).first():
         return jsonify({"error": "Another game with this title already exists."}), 400
 
+    previous_app_id = game.steam_app_id
+
     game.title = title
     game.status = status
     game.steam_app_id = steam_app_id
     game.modes = [m.strip() for m in modes if m.strip()]
-    game.genres = [g.strip() for g in genres if g.strip()]
+
+    if steam_app_id:
+        should_refresh = (
+            steam_app_id != previous_app_id or not game.genres or not game.icon_url
+        )
+        if should_refresh:
+            try:
+                _apply_steam_metadata(game, steam_app_id)
+            except SteamMetadataError as exc:
+                return jsonify({"error": str(exc)}), exc.status_code
+    else:
+        game.genres = []
+        game.icon_url = None
 
     db.session.commit()
 
@@ -343,6 +432,11 @@ def _import_games(entries: list[dict], status: str) -> tuple[list[Game], int]:
             continue
 
         game = Game(title=name, status=status, steam_app_id=str(app_id))
+        try:
+            _apply_steam_metadata(game, game.steam_app_id)
+        except SteamMetadataError:
+            game.genres = []
+            game.icon_url = None
         db.session.add(game)
         imported.append(game)
 

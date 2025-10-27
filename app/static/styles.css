@@ -23,6 +23,10 @@ body.steam-surface {
   color: var(--text);
 }
 
+.hidden {
+  display: none !important;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -337,6 +341,21 @@ textarea:focus {
   overflow: hidden;
 }
 
+.game-card-header {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.game-card-art {
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
 .game-card::after {
   content: "";
   position: absolute;
@@ -362,6 +381,10 @@ textarea:focus {
   gap: 0.5rem;
 }
 
+.tag-list-inline {
+  margin-top: 0.25rem;
+}
+
 .tag {
   padding: 0.3rem 0.75rem;
   border-radius: 999px;
@@ -370,6 +393,100 @@ textarea:focus {
   font-size: 0.75rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.art-preview {
+  min-height: 120px;
+  border: 1px dashed rgba(26, 159, 255, 0.35);
+  border-radius: 14px;
+  padding: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-muted);
+  background: rgba(9, 18, 30, 0.5);
+  transition: border 0.2s ease, background 0.2s ease;
+}
+
+.art-preview.has-art {
+  border-style: solid;
+  color: var(--text);
+  background: rgba(9, 18, 30, 0.7);
+}
+
+.art-preview img {
+  width: 100%;
+  max-height: 240px;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.55);
+}
+
+.searchable-select {
+  position: relative;
+}
+
+.searchable-options {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + 0.35rem);
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem 0;
+  background: rgba(9, 20, 32, 0.95);
+  border: 1px solid rgba(26, 159, 255, 0.2);
+  border-radius: 14px;
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 25;
+}
+
+.searchable-option {
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  outline: none;
+  color: var(--text);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.searchable-option:hover,
+.searchable-option:focus {
+  background: rgba(26, 159, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.searchable-option__inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.searchable-option__art {
+  width: 60px;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.45);
+}
+
+.searchable-option__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.searchable-option__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.searchable-option__status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted);
 }
 
 .elo-panel {
