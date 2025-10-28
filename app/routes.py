@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import csv
+import io
 import random
+import threading
+import time
 from datetime import date, datetime
 from html import unescape
 from itertools import combinations
@@ -10,6 +14,7 @@ import re
 import requests
 from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
 from .models import Comparison, Game, SessionLog
@@ -23,6 +28,29 @@ class SteamMetadataError(Exception):
     def __init__(self, message: str, status_code: int = 400) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class RateLimiter:
+    """Simple time-based rate limiter for external API calls."""
+
+    def __init__(self, min_interval: float) -> None:
+        self.min_interval = max(0.0, float(min_interval))
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def wait(self) -> None:
+        if self.min_interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call
+            if elapsed < self.min_interval:
+                time.sleep(self.min_interval - elapsed)
+                now = time.monotonic()
+            self._last_call = now
+
+
+steam_rate_limiter = RateLimiter(0.35)
 
 
 @bp.route("/")
@@ -97,6 +125,11 @@ def settings_page():
     return render_template("settings.html", page_id="settings")
 
 
+@bp.route("/import/backlog")
+def backlog_import_page():
+    return render_template("import_backlog.html", page_id="import-backlog")
+
+
 def _parse_date_field(value: str | None, label: str, required: bool = False) -> date | None:
     value = (value or "").strip()
     if not value:
@@ -128,6 +161,47 @@ def _clean_description(value: str | None) -> str | None:
     return text.strip() or None
 
 
+def _search_steam_app_id(title: str) -> str | None:
+    query = (title or "").strip()
+    if not query:
+        return None
+
+    url = "https://store.steampowered.com/api/storesearch/"
+    params = {"term": query, "cc": "us", "l": "en"}
+
+    try:
+        steam_rate_limiter.wait()
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise SteamMetadataError(f"Steam search failed: {exc}", 502) from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise SteamMetadataError("Invalid response from Steam search.", 502) from exc
+
+    items = payload.get("items") or []
+    if not isinstance(items, list):
+        return None
+
+    normalized = query.lower()
+    fallback: str | None = None
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        app_id = item.get("id")
+        name = (item.get("name") or "").strip()
+        if not app_id:
+            continue
+        app_id_str = str(app_id)
+        if name.lower() == normalized:
+            return app_id_str
+        if fallback is None:
+            fallback = app_id_str
+    return fallback
+
+
 def _fetch_steam_metadata(app_id: str) -> dict:
     app_id = (app_id or "").strip()
     if not app_id:
@@ -135,6 +209,7 @@ def _fetch_steam_metadata(app_id: str) -> dict:
 
     url = "https://store.steampowered.com/api/appdetails"
     try:
+        steam_rate_limiter.wait()
         response = requests.get(url, params={"appids": app_id}, timeout=10)
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -264,6 +339,123 @@ def games_collection():
 
     games = Game.query.order_by(Game.title.asc()).all()
     return jsonify([game.to_dict() for game in games])
+
+
+def _parse_csv_date(value: str | None, label: str) -> date | None:
+    value = (value or "").strip()
+    if not value:
+        return None
+
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Could not parse {label}: '{value}'.")
+
+
+def _parse_modes_field(value: str | None) -> list[str]:
+    text = (value or "").strip()
+    if not text:
+        return []
+    for delimiter in ("/", "&", "|"):
+        text = text.replace(delimiter, ",")
+    parts = [segment.strip() for segment in text.split(",")]
+    return [segment for segment in parts if segment]
+
+
+@bp.route("/api/import/backlog", methods=["POST"])
+def import_backlog_from_csv():
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Upload a CSV file."}), 400
+
+    try:
+        raw_text = upload.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        upload.stream.seek(0)
+        try:
+            raw_text = upload.read().decode("latin-1")
+        except UnicodeDecodeError as exc:
+            return jsonify({"error": "Could not decode CSV file."}), 400
+
+    reader = csv.DictReader(io.StringIO(raw_text))
+    if not reader.fieldnames:
+        return jsonify({"error": "CSV file has no header."}), 400
+
+    created_games: list[Game] = []
+    skipped: list[dict] = []
+
+    for row_index, row in enumerate(reader, start=2):
+        title = (row.get("Title") or row.get("title") or "").strip()
+        if not title:
+            skipped.append({"row": row_index, "title": None, "reason": "Missing title."})
+            continue
+
+        if Game.query.filter_by(title=title).first():
+            skipped.append({"row": row_index, "title": title, "reason": "Already in library."})
+            continue
+
+        try:
+            purchase_date = _parse_csv_date(row.get("Date_Acquired") or row.get("Date Acquired"), "purchase date")
+            start_date = _parse_csv_date(row.get("Date_Started") or row.get("Date Started"), "start date")
+            finish_date = _parse_csv_date(row.get("Date_Completed") or row.get("Date Completed"), "completion date")
+        except ValueError as exc:
+            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            continue
+
+        try:
+            steam_app_id = _search_steam_app_id(title)
+        except SteamMetadataError as exc:
+            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            continue
+
+        if not steam_app_id:
+            skipped.append({"row": row_index, "title": title, "reason": "Steam app not found."})
+            continue
+
+        try:
+            metadata = _fetch_steam_metadata(steam_app_id)
+        except SteamMetadataError as exc:
+            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            continue
+
+        game = Game(
+            title=title,
+            status="backlog",
+            steam_app_id=steam_app_id,
+            purchase_date=purchase_date,
+            start_date=start_date,
+            finish_date=finish_date,
+        )
+
+        modes_value = row.get("Num. of Players") or row.get("Num of Players") or row.get("Players")
+        game.modes = _parse_modes_field(modes_value)
+
+        _apply_steam_metadata(game, steam_app_id, metadata)
+
+        db.session.add(game)
+        created_games.append(game)
+
+    if created_games:
+        try:
+            db.session.commit()
+        except SQLAlchemyError:  # pragma: no cover - safeguard
+            db.session.rollback()
+            return jsonify({"error": "Failed to save imported games."}), 500
+    else:
+        db.session.rollback()
+
+    imported = [game.to_dict() for game in created_games]
+
+    return jsonify(
+        {
+            "imported_count": len(imported),
+            "skipped_count": len(skipped),
+            "imported": imported,
+            "skipped": skipped,
+        }
+    )
 
 
 @bp.route("/api/games/<int:game_id>", methods=["PUT", "DELETE"])

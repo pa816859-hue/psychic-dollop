@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Import Backlog · Game Backlog Companion{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <h2>Import backlog from CSV</h2>
+    <p>Upload a CSV export of your purchased games to add them to your backlog automatically.</p>
+  </div>
+
+  <form id="backlog-import-form" class="columns" enctype="multipart/form-data">
+    <div class="field">
+      <label for="backlog-import-file">CSV file</label>
+      <input id="backlog-import-file" name="file" type="file" accept=".csv,text/csv" required />
+      <small class="hint">Include columns for Title, Num. of Players, Date_Acquired, Date_Started, Date_Completed.</small>
+    </div>
+
+    <div class="field">
+      <button type="submit" class="primary">Import backlog</button>
+    </div>
+  </form>
+
+  <p id="backlog-import-result" class="hint"></p>
+
+  <section id="backlog-import-summary" class="import-summary hidden">
+    <div class="import-summary__column">
+      <h3>Imported</h3>
+      <ul id="backlog-import-imported" class="import-summary__list"></ul>
+    </div>
+    <div class="import-summary__column">
+      <h3>Skipped</h3>
+      <ul id="backlog-import-skipped" class="import-summary__list"></ul>
+    </div>
+  </section>
+</section>
+{% endblock %}
