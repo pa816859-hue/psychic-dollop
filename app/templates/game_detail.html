@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}{{ game.title }} · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel game-detail" id="game-detail">
+    <div class="panel-heading">
+      <h2>{{ game.title }}</h2>
+      <p>{{ game.short_description or "Track your progress and see how each session adds up." }}</p>
+    </div>
+    <div class="game-detail-header">
+      {% if game.icon_url %}
+        <img src="{{ game.icon_url }}" alt="{{ game.title }} artwork" class="game-detail-art" loading="lazy" />
+      {% endif %}
+      <div class="game-detail-header-text">
+        {% if game.genres %}
+          <div class="tag-list tag-list-inline">
+            {% for genre in game.genres %}
+              <span class="tag">{{ genre }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if game.modes %}
+          <div class="tag-list tag-list-inline">
+            {% for mode in game.modes %}
+              <span class="tag">{{ mode }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        <dl class="game-detail-timeline">
+          {% if game.purchase_date %}
+            <div>
+              <dt>Purchased</dt>
+              <dd>{{ game.purchase_date.strftime('%b %d, %Y') }}</dd>
+            </div>
+          {% endif %}
+          {% if game.start_date %}
+            <div>
+              <dt>Started</dt>
+              <dd>{{ game.start_date.strftime('%b %d, %Y') }}</dd>
+            </div>
+          {% endif %}
+          {% if game.finish_date %}
+            <div>
+              <dt>Finished</dt>
+              <dd>{{ game.finish_date.strftime('%b %d, %Y') }}</dd>
+            </div>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+    <div class="game-detail-metrics">
+      <div class="metric-card">
+        <h3>Weighted mark</h3>
+        <div
+          class="score-meter{% if weighted_score is none %} is-empty{% endif %}"
+          role="meter"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="{{ weighted_score|round(1) if weighted_score is not none else 0 }}"
+        >
+          <div class="score-meter__indicator" style="left: {{ '%.1f'|format(score_percent) }}%; background: {{ score_color }};"></div>
+        </div>
+        <p class="score-value">
+          {% if weighted_score is none %}
+            No sessions yet
+          {% else %}
+            {{ weighted_score|round(1) }}/100
+          {% endif %}
+        </p>
+        <p class="score-hint">Weighted by playtime across {{ sessions|length }} session{{ sessions|length != 1 and 's' or '' }}.</p>
+      </div>
+      <div class="metric-card">
+        <h3>Total playtime</h3>
+        <p class="metric-value">{{ '%.1f'|format(total_hours) }} hours</p>
+        <p class="metric-sub">{{ total_minutes }} minutes recorded.</p>
+      </div>
+    </div>
+    <div class="game-detail-sessions">
+      <h3>Recent sessions</h3>
+      {% if sessions %}
+        <table class="game-detail-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Playtime</th>
+              <th>Sentiment</th>
+              <th>Comment</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for session in sessions %}
+              <tr>
+                <td>{{ session.session_date.strftime('%b %d, %Y') }}</td>
+                <td>{{ session.playtime_minutes }} min</td>
+                <td class="sentiment-{{ session.sentiment }}">{{ session.sentiment.title() }}</td>
+                <td>{{ session.comment or '' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty-state">No sessions logged yet. Track a play session to start building a history.</p>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}
