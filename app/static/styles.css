@@ -434,14 +434,13 @@ textarea:focus {
   list-style: none;
   margin: 0;
   padding: 0.35rem 0;
-  background: rgba(4, 12, 24, 0.98);
+  background: #09162a;
   border: 1px solid rgba(26, 159, 255, 0.28);
   border-radius: 16px;
   box-shadow: 0 32px 70px rgba(3, 10, 18, 0.7);
   max-height: 260px;
   overflow-y: auto;
   z-index: 25;
-  backdrop-filter: blur(10px);
 }
 
 .searchable-option {
