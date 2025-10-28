@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Import Wishlist · Game Backlog Companion{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <h2>Import wishlist from CSV</h2>
+    <p>Upload a CSV export of your wishlist to add entries with Steam metadata automatically.</p>
+    <p class="hint">Need backlog imports instead? <a href="{{ url_for('core.backlog_import_page') }}">Go to the backlog CSV importer.</a></p>
+  </div>
+
+  <form id="wishlist-csv-import-form" class="columns" enctype="multipart/form-data">
+    <div class="field">
+      <label for="wishlist-csv-import-file">CSV file</label>
+      <input id="wishlist-csv-import-file" name="file" type="file" accept=".csv,text/csv" required />
+      <small class="hint">Include columns for Title, Num. of Players, Thoughts.</small>
+    </div>
+
+    <div class="field">
+      <button type="submit" class="primary">Import wishlist</button>
+    </div>
+  </form>
+
+  <p id="wishlist-csv-import-result" class="hint"></p>
+
+  <section id="wishlist-csv-import-summary" class="import-summary hidden">
+    <div class="import-summary__column">
+      <h3>Imported</h3>
+      <ul id="wishlist-csv-import-imported" class="import-summary__list"></ul>
+    </div>
+    <div class="import-summary__column">
+      <h3>Skipped</h3>
+      <ul id="wishlist-csv-import-skipped" class="import-summary__list"></ul>
+    </div>
+  </section>
+</section>
+{% endblock %}

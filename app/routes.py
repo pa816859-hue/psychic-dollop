@@ -130,6 +130,11 @@ def backlog_import_page():
     return render_template("import_backlog.html", page_id="import-backlog")
 
 
+@bp.route("/import/wishlist")
+def wishlist_import_page():
+    return render_template("import_wishlist.html", page_id="import-wishlist")
+
+
 def _parse_date_field(value: str | None, label: str, required: bool = False) -> date | None:
     value = (value or "").strip()
     if not value:
@@ -289,6 +294,7 @@ def games_collection():
         status = (payload.get("status") or "").strip().lower()
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
         modes = payload.get("modes") or []
+        thoughts = (payload.get("thoughts") or "").strip() or None
 
         metadata = None
         if steam_app_id:
@@ -324,6 +330,7 @@ def games_collection():
         game.purchase_date = purchase_date
         game.start_date = start_date
         game.finish_date = finish_date
+        game.thoughts = thoughts
 
         if steam_app_id:
             _apply_steam_metadata(game, steam_app_id, metadata)
@@ -337,7 +344,7 @@ def games_collection():
 
         return jsonify(game.to_dict()), 201
 
-    games = Game.query.order_by(Game.title.asc()).all()
+    games = Game.query.order_by(Game.elo_rating.desc(), Game.title.asc()).all()
     return jsonify([game.to_dict() for game in games])
 
 
@@ -458,6 +465,93 @@ def import_backlog_from_csv():
     )
 
 
+@bp.route("/api/import/wishlist", methods=["POST"])
+def import_wishlist_from_csv():
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify({"error": "Upload a CSV file."}), 400
+
+    try:
+        raw_text = upload.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        upload.stream.seek(0)
+        try:
+            raw_text = upload.read().decode("latin-1")
+        except UnicodeDecodeError:
+            return jsonify({"error": "Could not decode CSV file."}), 400
+
+    reader = csv.DictReader(io.StringIO(raw_text))
+    if not reader.fieldnames:
+        return jsonify({"error": "CSV file has no header."}), 400
+
+    created_games: list[Game] = []
+    skipped: list[dict] = []
+
+    for row_index, row in enumerate(reader, start=2):
+        title = (row.get("Title") or row.get("title") or "").strip()
+        if not title:
+            skipped.append({"row": row_index, "title": None, "reason": "Missing title."})
+            continue
+
+        if Game.query.filter_by(title=title).first():
+            skipped.append({"row": row_index, "title": title, "reason": "Already in library."})
+            continue
+
+        try:
+            steam_app_id = _search_steam_app_id(title)
+        except SteamMetadataError as exc:
+            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            continue
+
+        if not steam_app_id:
+            skipped.append({"row": row_index, "title": title, "reason": "Steam app not found."})
+            continue
+
+        try:
+            metadata = _fetch_steam_metadata(steam_app_id)
+        except SteamMetadataError as exc:
+            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            continue
+
+        game = Game(title=title, status="wishlist", steam_app_id=steam_app_id)
+
+        modes_value = (
+            row.get("Num. of Players")
+            or row.get("Num of Players")
+            or row.get("Players")
+        )
+        game.modes = _parse_modes_field(modes_value)
+
+        thoughts_value = (row.get("Thoughts") or row.get("thoughts") or "").strip()
+        if thoughts_value:
+            game.thoughts = thoughts_value
+
+        _apply_steam_metadata(game, steam_app_id, metadata)
+
+        db.session.add(game)
+        created_games.append(game)
+
+    if created_games:
+        try:
+            db.session.commit()
+        except SQLAlchemyError:  # pragma: no cover - safeguard
+            db.session.rollback()
+            return jsonify({"error": "Failed to save imported games."}), 500
+    else:
+        db.session.rollback()
+
+    imported = [game.to_dict() for game in created_games]
+
+    return jsonify(
+        {
+            "imported_count": len(imported),
+            "skipped_count": len(skipped),
+            "imported": imported,
+            "skipped": skipped,
+        }
+    )
+
+
 @bp.route("/api/games/<int:game_id>", methods=["PUT", "DELETE"])
 def games_resource(game_id: int):
     game = Game.query.get_or_404(game_id)
@@ -479,6 +573,10 @@ def games_resource(game_id: int):
     else:
         steam_app_id = game.steam_app_id
     modes = payload.get("modes") or game.modes
+    if "thoughts" in payload:
+        thoughts = (payload.get("thoughts") or "").strip() or None
+    else:
+        thoughts = game.thoughts
 
     if not title:
         return jsonify({"error": "Title is required."}), 400
@@ -520,10 +618,11 @@ def games_resource(game_id: int):
     game.title = title
     game.status = status
     game.steam_app_id = steam_app_id
-    game.modes = [m.strip() for m in modes if m.strip()]
+    game.modes = [m.strip() for m in modes if isinstance(m, str) and m.strip()]
     game.purchase_date = purchase_date
     game.start_date = start_date
     game.finish_date = finish_date
+    game.thoughts = thoughts
 
     if steam_app_id:
         should_refresh = (

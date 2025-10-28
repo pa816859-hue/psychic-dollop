@@ -124,6 +124,98 @@ async function initBacklogImportPage() {
   });
 }
 
+async function initWishlistCsvImportPage() {
+  const form = document.getElementById("wishlist-csv-import-form");
+  if (!form) return;
+
+  const fileInput = document.getElementById("wishlist-csv-import-file");
+  const result = document.getElementById("wishlist-csv-import-result");
+  const summary = document.getElementById("wishlist-csv-import-summary");
+  const importedList = document.getElementById("wishlist-csv-import-imported");
+  const skippedList = document.getElementById("wishlist-csv-import-skipped");
+
+  function resetSummary() {
+    if (importedList) importedList.innerHTML = "";
+    if (skippedList) skippedList.innerHTML = "";
+    summary?.classList.add("hidden");
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+      if (result) {
+        result.textContent = "Choose a CSV file to import.";
+      }
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    if (result) {
+      result.textContent = "Importing wishlist...";
+    }
+    resetSummary();
+
+    try {
+      const payload = await fetchJSON("/api/import/wishlist", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (result) {
+        result.textContent = `Imported ${payload.imported_count} game(s), skipped ${payload.skipped_count}.`;
+      }
+
+      if (Array.isArray(payload.imported) && importedList) {
+        payload.imported.forEach((game) => {
+          const item = document.createElement("li");
+          const details = [];
+          if (game.steam_app_id) {
+            details.push(`Steam App ID ${game.steam_app_id}`);
+          }
+          if (game.thoughts) {
+            details.push(`Thoughts: ${game.thoughts}`);
+          }
+          item.innerHTML = `<strong>${game.title}</strong>${
+            details.length ? ` · ${details.join(" · ")}` : ""
+          }`;
+          importedList.appendChild(item);
+        });
+      }
+
+      if (Array.isArray(payload.skipped) && skippedList) {
+        payload.skipped.forEach((entry) => {
+          const item = document.createElement("li");
+          const label = entry.title || `Row ${entry.row}`;
+          const rowInfo = entry.title && entry.row ? ` (Row ${entry.row})` : "";
+          const reason = entry.reason ? ` — ${entry.reason}` : "";
+          item.innerHTML = `<strong>${label}${rowInfo}</strong>${reason}`;
+          skippedList.appendChild(item);
+        });
+      }
+
+      if (
+        summary &&
+        ((payload.imported && payload.imported.length > 0) ||
+          (payload.skipped && payload.skipped.length > 0))
+      ) {
+        summary.classList.remove("hidden");
+      }
+
+      form.reset();
+      if (fileInput) {
+        fileInput.value = "";
+      }
+      await fetchAndCacheGames({ force: true });
+    } catch (error) {
+      if (result) {
+        result.textContent = error instanceof Error ? error.message : String(error);
+      }
+    }
+  });
+}
+
 function createGameCard(game, { onDelete, onUpdate } = {}) {
   const li = document.createElement("li");
   li.className = "game-card";
@@ -193,6 +285,13 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
     timeline.className = "meta meta-timeline";
     timeline.innerHTML = timelineRows.join("<br />");
     li.appendChild(timeline);
+  }
+
+  if (game.thoughts) {
+    const thoughts = document.createElement("p");
+    thoughts.className = "game-card-thoughts";
+    thoughts.textContent = game.thoughts;
+    li.appendChild(thoughts);
   }
 
   const actions = document.createElement("div");
@@ -274,6 +373,13 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
   }
   editFields.appendChild(buildField("Finished", finishInput));
 
+  const thoughtsInput = document.createElement("textarea");
+  thoughtsInput.name = "thoughts";
+  thoughtsInput.rows = 3;
+  thoughtsInput.value = game.thoughts || "";
+  thoughtsInput.placeholder = "Notes, vibes, wishlisted reasons...";
+  editFields.appendChild(buildField("Thoughts", thoughtsInput));
+
   editForm.appendChild(editFields);
 
   const editMessage = document.createElement("p");
@@ -311,6 +417,7 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
     purchaseInput.value = game.purchase_date || "";
     startInput.value = game.start_date || "";
     finishInput.value = game.finish_date || "";
+    thoughtsInput.value = game.thoughts || "";
     editMessage.textContent = "";
     updateEditPurchaseRequirement();
   }
@@ -366,12 +473,14 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
   editForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (saving) return;
+    const trimmedThoughts = thoughtsInput.value.trim();
     const payload = {
       title: titleInput.value.trim(),
       status: statusSelect.value,
       purchase_date: purchaseInput.value ? purchaseInput.value : null,
       start_date: startInput.value ? startInput.value : null,
       finish_date: finishInput.value ? finishInput.value : null,
+      thoughts: trimmedThoughts ? trimmedThoughts : null,
     };
 
     if (!payload.title) {
@@ -437,6 +546,7 @@ async function initAddGamePage() {
   const purchaseGroup = form.querySelector("[data-purchase-group]");
   const startInput = document.getElementById("start-date");
   const finishInput = document.getElementById("finish-date");
+  const thoughtsInput = document.getElementById("thoughts");
   const steamAppIdInput = document.getElementById("steam-app-id");
   const steamAppIdStatus = document.getElementById("steam-app-id-status");
   const detectedGenresContainer = document.getElementById("detected-genres");
@@ -630,6 +740,7 @@ async function initAddGamePage() {
       purchase_date: formData.get("purchase_date"),
       start_date: formData.get("start_date"),
       finish_date: formData.get("finish_date"),
+      thoughts: formData.get("thoughts"),
       modes: Array.from(form.querySelectorAll(".mode-option:checked")).map((input) =>
         input.value.trim()
       ),
@@ -638,6 +749,7 @@ async function initAddGamePage() {
     payload.title = String(payload.title || "").trim();
     payload.status = String(payload.status || "backlog").trim().toLowerCase();
     payload.steam_app_id = String(payload.steam_app_id || "").trim();
+    payload.thoughts = String(payload.thoughts || "").trim();
     payload.purchase_date = String(payload.purchase_date || "").trim();
     payload.start_date = String(payload.start_date || "").trim();
     payload.finish_date = String(payload.finish_date || "").trim();
@@ -654,6 +766,9 @@ async function initAddGamePage() {
 
     if (!payload.steam_app_id) {
       delete payload.steam_app_id;
+    }
+    if (!payload.thoughts) {
+      delete payload.thoughts;
     }
     if (!payload.purchase_date) {
       delete payload.purchase_date;
@@ -678,6 +793,7 @@ async function initAddGamePage() {
       if (steamAppIdStatus) {
         steamAppIdStatus.textContent = defaultSteamStatusMessage;
       }
+      thoughtsInput?.value = "";
       await fetchAndCacheGames({ force: true });
       updatePurchaseRequirement();
       if (statusSelect.value === "backlog") {
@@ -701,22 +817,36 @@ async function initLibraryPage() {
 
   async function renderLists() {
     const games = await fetchAndCacheGames({ force: true });
+    const byEloDesc = (a, b) =>
+      (Number(b.elo_rating) || 0) - (Number(a.elo_rating) || 0);
 
     if (backlogList) {
       backlogList.innerHTML = "";
-    }
-    if (wishlistList) {
-      wishlistList.innerHTML = "";
+      const backlogGames = games
+        .filter((game) => game.status === "backlog")
+        .sort(byEloDesc);
+      backlogGames.forEach((game) => {
+        const card = createGameCard(game, {
+          onDelete: renderLists,
+          onUpdate: renderLists,
+        });
+        backlogList.appendChild(card);
+      });
     }
 
-    games.forEach((game) => {
-      const card = createGameCard(game, { onDelete: renderLists, onUpdate: renderLists });
-      if (game.status === "backlog" && backlogList) {
-        backlogList.appendChild(card);
-      } else if (wishlistList) {
+    if (wishlistList) {
+      wishlistList.innerHTML = "";
+      const wishlistGames = games
+        .filter((game) => game.status === "wishlist")
+        .sort(byEloDesc);
+      wishlistGames.forEach((game) => {
+        const card = createGameCard(game, {
+          onDelete: renderLists,
+          onUpdate: renderLists,
+        });
         wishlistList.appendChild(card);
-      }
-    });
+      });
+    }
 
     if (backlogList && backlogList.children.length === 0) {
       const item = document.createElement("li");
@@ -1154,6 +1284,7 @@ async function initSettingsPage() {
 async function bootstrap() {
   await Promise.all([
     initBacklogImportPage(),
+    initWishlistCsvImportPage(),
     initAddGamePage(),
     initLibraryPage(),
     initRankingsPage(),
