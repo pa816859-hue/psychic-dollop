@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block title %}Library · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel" id="lists">
+    <div class="panel-heading">
+      <h2>Your library</h2>
+      <p>Browse and manage everything in your backlog and wishlist.</p>
+    </div>
+    <div class="columns">
+      <div>
+        <h3>Backlog</h3>
+        <ul id="backlog-list" class="game-list"></ul>
+      </div>
+      <div>
+        <h3>Wishlist</h3>
+        <ul id="wishlist-list" class="game-list"></ul>
+      </div>
+    </div>
+  </section>
+{% endblock %}

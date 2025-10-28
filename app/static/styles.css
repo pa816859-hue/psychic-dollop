@@ -65,6 +65,14 @@ a:hover {
   color: var(--accent);
 }
 
+.brand a {
+  color: inherit;
+}
+
+.brand a:hover {
+  color: var(--accent);
+}
+
 .nav-links {
   list-style: none;
   display: flex;
@@ -269,6 +277,15 @@ label {
   text-transform: uppercase;
   letter-spacing: 0.15em;
   color: var(--text-muted);
+}
+
+.field.is-optional > label::after {
+  content: " (optional)";
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: 0.35rem;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 input,
@@ -655,6 +672,35 @@ textarea:focus {
   justify-content: space-between;
   align-items: center;
   border: 1px solid rgba(26, 159, 255, 0.12);
+}
+
+.ranking-score {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+}
+
+.meta-timeline {
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.meta-timeline strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.empty-state {
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+  list-style: none;
+}
+
+#sessions-table .empty-state {
+  display: block;
+  padding: 1.5rem;
 }
 
 #sessions-table {

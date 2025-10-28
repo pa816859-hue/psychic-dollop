@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Sessions · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel" id="sessions">
+    <div class="panel-heading">
+      <h2>Session log</h2>
+      <p>Capture when you played, how long, and how it felt.</p>
+    </div>
+    <form id="session-form">
+      <div class="field">
+        <label for="session-game-input">Game</label>
+        <div class="searchable-select">
+          <input
+            id="session-game-input"
+            name="game_title"
+            type="text"
+            placeholder="Search your library"
+            autocomplete="off"
+            required
+          />
+          <ul id="session-game-options" class="searchable-options hidden"></ul>
+        </div>
+        <input id="session-game-id" name="game_id" type="hidden" />
+      </div>
+      <div class="field">
+        <label for="session-date">Date</label>
+        <input id="session-date" name="session_date" type="date" required />
+      </div>
+      <div class="field">
+        <label for="session-playtime">Playtime (minutes)</label>
+        <input id="session-playtime" name="playtime_minutes" type="number" min="1" required />
+      </div>
+      <fieldset>
+        <legend>Session quality</legend>
+        <div class="radio-group">
+          <label><input type="radio" name="sentiment" value="good" required /> Good</label>
+          <label><input type="radio" name="sentiment" value="mediocre" /> Mediocre</label>
+          <label><input type="radio" name="sentiment" value="bad" /> Bad</label>
+        </div>
+      </fieldset>
+      <div class="field">
+        <label for="session-comment">Comments</label>
+        <textarea id="session-comment" name="comment" rows="3"></textarea>
+      </div>
+      <button type="submit">Log session</button>
+      <p class="hint" id="session-form-message"></p>
+    </form>
+    <table id="sessions-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Game</th>
+          <th>Playtime</th>
+          <th>Sentiment</th>
+          <th>Comment</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </section>
+{% endblock %}

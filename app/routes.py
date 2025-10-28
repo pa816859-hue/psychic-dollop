@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime
+from datetime import date, datetime
 from html import unescape
 from itertools import combinations
 from typing import Iterable, Tuple
@@ -26,8 +26,48 @@ class SteamMetadataError(Exception):
 
 
 @bp.route("/")
-def index():
-    return render_template("index.html")
+def home():
+    return render_template("home.html", page_id="home")
+
+
+@bp.route("/games/add")
+def add_game_page():
+    return render_template("add_game.html", page_id="add-game")
+
+
+@bp.route("/library")
+def library_page():
+    return render_template("library.html", page_id="library")
+
+
+@bp.route("/rankings")
+def rankings_page():
+    return render_template("rankings.html", page_id="rankings")
+
+
+@bp.route("/sessions")
+def sessions_page():
+    return render_template("sessions.html", page_id="sessions")
+
+
+@bp.route("/settings")
+def settings_page():
+    return render_template("settings.html", page_id="settings")
+
+
+def _parse_date_field(value: str | None, label: str, required: bool = False) -> date | None:
+    value = (value or "").strip()
+    if not value:
+        if required:
+            raise ValueError(f"{label} is required.")
+        return None
+
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label} must be a valid date in YYYY-MM-DD format."
+        ) from exc
 
 
 def _validate_status(status: str) -> str:
@@ -150,11 +190,23 @@ def games_collection():
         except ValueError as exc:  # pragma: no cover - defensive
             return jsonify({"error": str(exc)}), 400
 
+        try:
+            purchase_date = _parse_date_field(
+                payload.get("purchase_date"), "Purchase date", required=status == "backlog"
+            )
+            start_date = _parse_date_field(payload.get("start_date"), "Start date")
+            finish_date = _parse_date_field(payload.get("finish_date"), "Finish date")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
         if Game.query.filter_by(title=title).first():
             return jsonify({"error": "Game with this title already exists."}), 400
 
         game = Game(title=title, status=status, steam_app_id=steam_app_id)
         game.modes = [m.strip() for m in modes if m.strip()]
+        game.purchase_date = purchase_date
+        game.start_date = start_date
+        game.finish_date = finish_date
 
         if steam_app_id:
             _apply_steam_metadata(game, steam_app_id, metadata)
@@ -202,6 +254,30 @@ def games_resource(game_id: int):
     except ValueError as exc:  # pragma: no cover - defensive
         return jsonify({"error": str(exc)}), 400
 
+    try:
+        if "purchase_date" in payload:
+            purchase_date = _parse_date_field(
+                payload.get("purchase_date"),
+                "Purchase date",
+                required=status == "backlog",
+            )
+        else:
+            purchase_date = game.purchase_date
+            if status == "backlog" and purchase_date is None:
+                raise ValueError("Purchase date is required.")
+
+        if "start_date" in payload:
+            start_date = _parse_date_field(payload.get("start_date"), "Start date")
+        else:
+            start_date = game.start_date
+
+        if "finish_date" in payload:
+            finish_date = _parse_date_field(payload.get("finish_date"), "Finish date")
+        else:
+            finish_date = game.finish_date
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     if title != game.title and Game.query.filter_by(title=title).first():
         return jsonify({"error": "Another game with this title already exists."}), 400
 
@@ -211,6 +287,9 @@ def games_resource(game_id: int):
     game.status = status
     game.steam_app_id = steam_app_id
     game.modes = [m.strip() for m in modes if m.strip()]
+    game.purchase_date = purchase_date
+    game.start_date = start_date
+    game.finish_date = finish_date
 
     if steam_app_id:
         should_refresh = (
@@ -480,6 +559,8 @@ def _import_games(entries: list[dict], status: str) -> tuple[list[Game], int]:
             game.genres = []
             game.icon_url = None
             game.short_description = None
+        if status == "backlog" and game.purchase_date is None:
+            game.purchase_date = datetime.utcnow().date()
         db.session.add(game)
         imported.append(game)
 

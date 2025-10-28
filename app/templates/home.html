@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block header_extra %}
+  <div class="hero">
+    <div class="hero-text">
+      <p class="eyebrow">Game backlog companion</p>
+      <h1>Queue up your next adventure</h1>
+      <p>
+        Import from Steam, track every session, and let ELO-style matchups surface the next game you
+        should play.
+      </p>
+    </div>
+    <div class="hero-cta">
+      <a class="primary" href="{{ url_for('core.add_game_page') }}">Start adding games</a>
+      <a class="secondary" href="{{ url_for('core.settings_page') }}">Sync with Steam</a>
+    </div>
+  </div>
+{% endblock %}
+
+{% block content %}
+  <section class="panel">
+    <div class="panel-heading">
+      <h2>Welcome to Deck Commander</h2>
+      <p>
+        Use the navigation above to add games, browse your library, run ELO comparisons, log play
+        sessions, or manage Steam integrations.
+      </p>
+    </div>
+    <p>
+      Each tool now lives on its own dedicated page to make room for future features and keep things
+      organized as your collection grows.
+    </p>
+  </section>
+{% endblock %}
