@@ -4,7 +4,7 @@ const backlogList = document.getElementById("backlog-list");
 const wishlistList = document.getElementById("wishlist-list");
 const backlogRanking = document.getElementById("backlog-ranking");
 const wishlistRanking = document.getElementById("wishlist-ranking");
-const pairButtons = document.querySelectorAll(".pair-btn");
+const addGameTitleInput = document.getElementById("title");
 const sessionForm = document.getElementById("session-form");
 const sessionMessage = document.getElementById("session-form-message");
 const sessionsTableBody = document.querySelector("#sessions-table tbody");
@@ -22,6 +22,10 @@ const libraryImportForm = document.getElementById("library-import-form");
 const wishlistImportForm = document.getElementById("wishlist-import-form");
 const libraryImportResult = document.getElementById("library-import-result");
 const wishlistImportResult = document.getElementById("wishlist-import-result");
+const pairContainers = {
+  backlog: document.getElementById("backlog-pair"),
+  wishlist: document.getElementById("wishlist-pair"),
+};
 const defaultSteamStatusMessage =
   (steamAppIdStatus?.textContent || "").trim() ||
   "Add an App ID to fetch genres and artwork.";
@@ -35,6 +39,15 @@ const defaultArtworkMessage =
 let cachedGames = [];
 let steamLookupTimeout;
 let steamLookupToken = 0;
+let addGameTitleAutofilled = false;
+let sessionGameMatches = [];
+let sessionGameHighlightIndex = -1;
+const pairState = {
+  backlog: { loading: false, submitting: false, current: null, feedback: null },
+  wishlist: { loading: false, submitting: false, current: null, feedback: null },
+};
+
+sessionGameOptions?.setAttribute("role", "listbox");
 
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
@@ -53,6 +66,20 @@ async function fetchJSON(url, options) {
 
 function buildTagElements(items) {
   return items.map((item) => `<span class="tag">${item}</span>`).join(" ");
+}
+
+function clearTitleAutofill() {
+  addGameTitleAutofilled = false;
+}
+
+function applyTitleAutofill(value) {
+  if (!addGameTitleInput) return;
+  const trimmed = (value || "").trim();
+  if (!trimmed) return;
+  if (!addGameTitleInput.value.trim() || addGameTitleAutofilled) {
+    addGameTitleInput.value = trimmed;
+    addGameTitleAutofilled = true;
+  }
 }
 
 function createGameCard(game) {
@@ -126,11 +153,38 @@ function createGameCard(game) {
   return li;
 }
 
+function updateSessionGameHighlight() {
+  if (!sessionGameOptions) return;
+  const items = Array.from(sessionGameOptions.querySelectorAll("li"));
+  items.forEach((item, index) => {
+    if (index === sessionGameHighlightIndex) {
+      item.classList.add("is-active");
+      item.setAttribute("aria-selected", "true");
+      item.scrollIntoView({ block: "nearest" });
+    } else {
+      item.classList.remove("is-active");
+      item.setAttribute("aria-selected", "false");
+    }
+  });
+}
+
+function highlightSessionGame(index) {
+  sessionGameHighlightIndex = index;
+  updateSessionGameHighlight();
+}
+
+function clearSessionGameHighlight() {
+  sessionGameHighlightIndex = -1;
+  updateSessionGameHighlight();
+}
+
 function hideSessionGameOptions() {
   if (sessionGameOptions) {
     sessionGameOptions.classList.add("hidden");
     sessionGameOptions.innerHTML = "";
   }
+  sessionGameMatches = [];
+  clearSessionGameHighlight();
 }
 
 function selectSessionGame(game) {
@@ -148,9 +202,12 @@ function renderSessionGameOptions(query = "") {
 
   const normalized = query.trim().toLowerCase();
   const matches = cachedGames
-    .filter((game) =>
-      !normalized || game.title.toLowerCase().includes(normalized)
-    )
+    .filter((game) => {
+      if (!normalized) return true;
+      const titleMatch = game.title.toLowerCase().includes(normalized);
+      const idMatch = String(game.id).startsWith(normalized);
+      return titleMatch || idMatch;
+    })
     .slice(0, 10);
 
   sessionGameOptions.innerHTML = "";
@@ -159,10 +216,19 @@ function renderSessionGameOptions(query = "") {
     return;
   }
 
-  matches.forEach((game) => {
+  sessionGameMatches = matches;
+  if (matches.length > 0 && normalized) {
+    sessionGameHighlightIndex = 0;
+  } else {
+    clearSessionGameHighlight();
+  }
+
+  matches.forEach((game, index) => {
     const item = document.createElement("li");
     item.className = "searchable-option";
     item.tabIndex = 0;
+    item.setAttribute("role", "option");
+    item.dataset.index = String(index);
 
     const inner = document.createElement("div");
     inner.className = "searchable-option__inner";
@@ -186,11 +252,16 @@ function renderSessionGameOptions(query = "") {
 
     const status = document.createElement("span");
     status.className = "searchable-option__status";
-    status.textContent = game.status === "backlog" ? "Backlog" : "Wishlist";
+    const listLabel = game.status === "backlog" ? "Backlog" : "Wishlist";
+    status.textContent = `${listLabel} • #${game.id}`;
     text.appendChild(status);
 
     inner.appendChild(text);
     item.appendChild(inner);
+
+    item.addEventListener("mouseenter", () => {
+      highlightSessionGame(index);
+    });
 
     item.addEventListener("mousedown", (event) => {
       event.preventDefault();
@@ -205,10 +276,25 @@ function renderSessionGameOptions(query = "") {
         sessionGameInput?.focus();
       } else if (event.key === "ArrowDown") {
         event.preventDefault();
-        (item.nextElementSibling || sessionGameInput)?.focus();
+        const next = Math.min(index + 1, matches.length - 1);
+        const nextItem = sessionGameOptions?.querySelector(
+          `li[data-index="${next}"]`
+        );
+        highlightSessionGame(next);
+        (nextItem || sessionGameInput)?.focus();
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        (item.previousElementSibling || sessionGameInput)?.focus();
+        const prev = index - 1 < 0 ? -1 : index - 1;
+        if (prev === -1) {
+          clearSessionGameHighlight();
+          sessionGameInput?.focus();
+        } else {
+          const prevItem = sessionGameOptions?.querySelector(
+            `li[data-index="${prev}"]`
+          );
+          highlightSessionGame(prev);
+          (prevItem || sessionGameInput)?.focus();
+        }
       } else if (event.key === "Escape") {
         hideSessionGameOptions();
         sessionGameInput?.focus();
@@ -219,6 +305,7 @@ function renderSessionGameOptions(query = "") {
   });
 
   sessionGameOptions.classList.remove("hidden");
+  updateSessionGameHighlight();
 }
 
 function clearSteamMetadataPreview(message) {
@@ -286,6 +373,7 @@ async function lookupSteamMetadata(appId) {
     }
 
     const data = entry.data;
+    applyTitleAutofill(data?.name);
     const genres = Array.isArray(data.genres)
       ? data.genres
           .map((genre) => genre?.description)
@@ -355,12 +443,36 @@ sessionGameInput?.addEventListener("blur", () => {
   setTimeout(() => hideSessionGameOptions(), 120);
 });
 
+addGameTitleInput?.addEventListener("input", () => {
+  clearTitleAutofill();
+});
+
 sessionGameInput?.addEventListener("keydown", (event) => {
   if (event.key === "ArrowDown") {
-    const first = sessionGameOptions?.querySelector("li");
-    if (first) {
+    if (sessionGameMatches.length > 0) {
       event.preventDefault();
-      first.focus();
+      const nextIndex =
+        sessionGameHighlightIndex + 1 >= sessionGameMatches.length
+          ? 0
+          : sessionGameHighlightIndex + 1;
+      highlightSessionGame(nextIndex);
+    }
+  } else if (event.key === "ArrowUp") {
+    if (sessionGameMatches.length > 0) {
+      event.preventDefault();
+      const nextIndex =
+        sessionGameHighlightIndex <= 0
+          ? sessionGameMatches.length - 1
+          : sessionGameHighlightIndex - 1;
+      highlightSessionGame(nextIndex);
+    }
+  } else if (event.key === "Enter") {
+    if (sessionGameHighlightIndex >= 0) {
+      event.preventDefault();
+      const selected = sessionGameMatches[sessionGameHighlightIndex];
+      if (selected) {
+        selectSessionGame(selected);
+      }
     }
   } else if (event.key === "Escape") {
     hideSessionGameOptions();
@@ -410,6 +522,8 @@ async function loadGames() {
     }
 
     await refreshRankings();
+    ensurePairLoaded("backlog");
+    ensurePairLoaded("wishlist");
   } catch (error) {
     gameMessage.textContent = error.message;
   }
@@ -442,6 +556,10 @@ async function refreshRankings() {
   }
 }
 
+addGameForm?.addEventListener("reset", () => {
+  clearTitleAutofill();
+});
+
 addGameForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const formData = new FormData(addGameForm);
@@ -464,6 +582,7 @@ addGameForm?.addEventListener("submit", async (event) => {
     });
     gameMessage.textContent = "Game added.";
     addGameForm.reset();
+    clearTitleAutofill();
     clearSteamMetadataPreview();
     if (steamAppIdStatus) {
       steamAppIdStatus.textContent = defaultSteamStatusMessage;
@@ -474,62 +593,186 @@ addGameForm?.addEventListener("submit", async (event) => {
   }
 });
 
-pairButtons.forEach((button) => {
-  button.addEventListener("click", async () => {
-    const status = button.dataset.status;
-    const panel = document.getElementById(`${status}-pair`);
-    panel.textContent = "Loading pair...";
-    try {
-      const pair = await fetchJSON(`/api/rankings/${status}/pair`);
-      if (pair.message) {
-        panel.textContent = pair.message;
-        return;
-      }
-      renderPair(panel, status, pair.game_a, pair.game_b);
-    } catch (error) {
-      panel.textContent = error.message;
-    }
-  });
-});
+function setPairMessage(status, message, options = {}) {
+  const container = pairContainers[status];
+  if (!container) return;
+  const { isError = false, allowRetry = false } = options;
+  container.innerHTML = "";
+  const messageEl = document.createElement("p");
+  messageEl.className = "pair-message";
+  if (isError) {
+    messageEl.classList.add("pair-message--error");
+  }
+  messageEl.textContent = message;
+  container.appendChild(messageEl);
+  if (isError && allowRetry) {
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.className = "pair-retry";
+    retryButton.textContent = "Try again";
+    retryButton.addEventListener("click", () => {
+      loadPair(status, { force: true });
+    });
+    container.appendChild(retryButton);
+  }
+  pairState[status].current = null;
+  pairState[status].feedback = null;
+}
+
+function showPairInlineMessage(status, message, isError = false) {
+  const feedback = pairState[status].feedback;
+  if (!feedback) return;
+  if (message) {
+    feedback.textContent = message;
+    feedback.classList.toggle("pair-feedback--error", Boolean(isError));
+  } else {
+    feedback.textContent = "";
+    feedback.classList.remove("pair-feedback--error");
+  }
+}
+
+async function handlePairSelection(status, gameA, gameB, winnerId, trigger) {
+  const state = pairState[status];
+  if (state.submitting) return;
+  state.submitting = true;
+
+  const originalText = trigger.textContent;
+  trigger.disabled = true;
+  trigger.textContent = "Recording...";
+  showPairInlineMessage(status, "");
+
+  try {
+    await fetchJSON(`/api/rankings/${status}/compare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        game_a_id: gameA.id,
+        game_b_id: gameB.id,
+        winner_id: winnerId,
+      }),
+    });
+    await refreshRankings();
+    await loadPair(status, { force: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    trigger.disabled = false;
+    trigger.textContent = originalText;
+    showPairInlineMessage(status, message, true);
+  } finally {
+    state.submitting = false;
+  }
+}
 
 function renderPair(container, status, gameA, gameB) {
+  const state = pairState[status];
+  state.current = { gameA, gameB };
+  state.feedback = null;
+
   container.innerHTML = "";
 
-  [
-    { game: gameA, opponent: gameB },
-    { game: gameB, opponent: gameA },
-  ].forEach(({ game, opponent }) => {
-    const row = document.createElement("div");
-    row.className = "pair-choice";
+  const grid = document.createElement("div");
+  grid.className = "pair-grid";
 
-    const label = document.createElement("span");
-    label.textContent = game.title;
-    row.appendChild(label);
+  [gameA, gameB].forEach((game) => {
+    const card = document.createElement("article");
+    card.className = "pair-card";
+
+    const media = document.createElement("div");
+    media.className = "pair-card__media";
+    if (game.icon_url) {
+      const img = document.createElement("img");
+      img.src = game.icon_url;
+      img.alt = `${game.title} artwork`;
+      img.loading = "lazy";
+      media.appendChild(img);
+    } else {
+      media.textContent = game.title.slice(0, 1).toUpperCase();
+    }
+    card.appendChild(media);
+
+    const content = document.createElement("div");
+    content.className = "pair-card__content";
+
+    const title = document.createElement("h4");
+    title.className = "pair-card__title";
+    title.textContent = game.title;
+    content.appendChild(title);
+
+    if (game.genres && game.genres.length > 0) {
+      const genres = document.createElement("div");
+      genres.className = "pair-card__genres tag-list tag-list-inline";
+      genres.innerHTML = buildTagElements(game.genres.slice(0, 4));
+      content.appendChild(genres);
+    }
+
+    const description = document.createElement("p");
+    description.className = "pair-card__description";
+    description.textContent =
+      game.short_description || "No description available yet.";
+    content.appendChild(description);
+
+    const actions = document.createElement("div");
+    actions.className = "pair-card__actions";
 
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = "Pick";
-    button.addEventListener("click", async () => {
-      try {
-        await fetchJSON(`/api/rankings/${status}/compare`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            game_a_id: gameA.id,
-            game_b_id: gameB.id,
-            winner_id: game.id,
-          }),
-        });
-        container.textContent = "Comparison saved.";
-        await refreshRankings();
-      } catch (error) {
-        container.textContent = error.message;
-      }
-    });
+    button.className = "pair-card__action";
+    button.textContent = "Pick this game";
+    button.addEventListener("click", () =>
+      handlePairSelection(status, gameA, gameB, game.id, button)
+    );
+    actions.appendChild(button);
 
-    row.appendChild(button);
-    container.appendChild(row);
+    content.appendChild(actions);
+    card.appendChild(content);
+    grid.appendChild(card);
   });
+
+  container.appendChild(grid);
+
+  const feedback = document.createElement("p");
+  feedback.className = "pair-feedback";
+  feedback.setAttribute("role", "status");
+  feedback.setAttribute("aria-live", "polite");
+  container.appendChild(feedback);
+  state.feedback = feedback;
+  showPairInlineMessage(status, "");
+}
+
+async function loadPair(status, options = {}) {
+  const container = pairContainers[status];
+  if (!container) return;
+
+  const state = pairState[status];
+  if (state.loading && !options.force) {
+    return;
+  }
+
+  state.loading = true;
+  setPairMessage(status, "Loading next matchup...");
+
+  try {
+    const pair = await fetchJSON(`/api/rankings/${status}/pair`);
+    if (pair.message) {
+      setPairMessage(status, pair.message);
+      return;
+    }
+    renderPair(container, status, pair.game_a, pair.game_b);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setPairMessage(status, message, { isError: true, allowRetry: true });
+  } finally {
+    state.loading = false;
+  }
+}
+
+function ensurePairLoaded(status) {
+  const container = pairContainers[status];
+  if (!container) return;
+  const state = pairState[status];
+  if (!state.current && !state.loading) {
+    loadPair(status);
+  }
 }
 
 sessionForm?.addEventListener("submit", async (event) => {
@@ -696,6 +939,8 @@ async function bootstrap() {
   if (dateInput) {
     dateInput.value = today;
   }
+  ensurePairLoaded("backlog");
+  ensurePairLoaded("wishlist");
 }
 
 bootstrap().catch((error) => {

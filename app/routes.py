@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import random
 from datetime import datetime
+from html import unescape
 from itertools import combinations
 from typing import Iterable, Tuple
+import re
 
 import requests
 from flask import Blueprint, jsonify, render_template, request
@@ -35,10 +37,19 @@ def _validate_status(status: str) -> str:
     return status
 
 
-def _fetch_steam_metadata(app_id: str) -> tuple[list[str], str | None]:
+def _clean_description(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = unescape(value)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip() or None
+
+
+def _fetch_steam_metadata(app_id: str) -> dict:
     app_id = (app_id or "").strip()
     if not app_id:
-        return [], None
+        return {"genres": [], "icon_url": None, "title": None, "short_description": None}
 
     url = "https://store.steampowered.com/api/appdetails"
     try:
@@ -79,18 +90,38 @@ def _fetch_steam_metadata(app_id: str) -> tuple[list[str], str | None]:
                 f"{app_id}/{icon_hash}.jpg"
             )
 
-    return genres, icon_url
+    title = (data.get("name") or "").strip() or None
+    short_description = _clean_description(
+        data.get("short_description") or data.get("about_the_game")
+    )
+
+    return {
+        "genres": genres,
+        "icon_url": icon_url,
+        "title": title,
+        "short_description": short_description,
+    }
 
 
-def _apply_steam_metadata(game: Game, app_id: str | None) -> None:
+def _apply_steam_metadata(
+    game: Game, app_id: str | None, metadata: dict | None = None
+) -> None:
     if not app_id:
         game.genres = []
         game.icon_url = None
+        game.short_description = None
         return
 
-    genres, icon_url = _fetch_steam_metadata(app_id)
-    game.genres = genres
-    game.icon_url = icon_url
+    if metadata is None:
+        metadata = _fetch_steam_metadata(app_id)
+
+    game.genres = metadata.get("genres", [])
+    game.icon_url = metadata.get("icon_url")
+    game.short_description = metadata.get("short_description")
+    if not game.title:
+        fetched_title = metadata.get("title")
+        if fetched_title:
+            game.title = fetched_title
 
 
 @bp.route("/api/games", methods=["GET", "POST"])
@@ -101,6 +132,15 @@ def games_collection():
         status = (payload.get("status") or "").strip().lower()
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
         modes = payload.get("modes") or []
+
+        metadata = None
+        if steam_app_id:
+            try:
+                metadata = _fetch_steam_metadata(steam_app_id)
+            except SteamMetadataError as exc:
+                return jsonify({"error": str(exc)}), exc.status_code
+            if not title:
+                title = metadata.get("title") or ""
 
         if not title:
             return jsonify({"error": "Title is required."}), 400
@@ -117,13 +157,11 @@ def games_collection():
         game.modes = [m.strip() for m in modes if m.strip()]
 
         if steam_app_id:
-            try:
-                _apply_steam_metadata(game, steam_app_id)
-            except SteamMetadataError as exc:
-                return jsonify({"error": str(exc)}), exc.status_code
+            _apply_steam_metadata(game, steam_app_id, metadata)
         else:
             game.genres = []
             game.icon_url = None
+            game.short_description = None
 
         db.session.add(game)
         db.session.commit()
@@ -176,7 +214,10 @@ def games_resource(game_id: int):
 
     if steam_app_id:
         should_refresh = (
-            steam_app_id != previous_app_id or not game.genres or not game.icon_url
+            steam_app_id != previous_app_id
+            or not game.genres
+            or not game.icon_url
+            or not game.short_description
         )
         if should_refresh:
             try:
@@ -186,6 +227,7 @@ def games_resource(game_id: int):
     else:
         game.genres = []
         game.icon_url = None
+        game.short_description = None
 
     db.session.commit()
 
@@ -327,9 +369,6 @@ def sessions_collection():
         sentiment = (payload.get("sentiment") or "").strip().lower()
         comment = (payload.get("comment") or "").strip() or None
 
-        if not game_title:
-            return jsonify({"error": "Game title is required."}), 400
-
         if sentiment not in {"good", "mediocre", "bad"}:
             return jsonify({"error": "Sentiment must be good, mediocre, or bad."}), 400
 
@@ -345,6 +384,9 @@ def sessions_collection():
             game = Game.query.get(game_id)
             if game:
                 game_title = game.title
+
+        if not game_title:
+            return jsonify({"error": "Game title is required."}), 400
 
         session = SessionLog(
             game_id=game_id,
@@ -437,6 +479,7 @@ def _import_games(entries: list[dict], status: str) -> tuple[list[Game], int]:
         except SteamMetadataError:
             game.genres = []
             game.icon_url = None
+            game.short_description = None
         db.session.add(game)
         imported.append(game)
 
