@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Add a Game · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel" id="add-game">
+    <div class="panel-heading">
+      <h2>Add a game</h2>
+      <p>Tag play styles, capture purchase details, and enrich metadata from Steam.</p>
+    </div>
+    <form id="add-game-form">
+      <div class="field">
+        <label for="title">Title</label>
+        <input id="title" name="title" type="text" required />
+      </div>
+      <div class="field">
+        <label for="status">List</label>
+        <select id="status" name="status">
+          <option value="backlog">Backlog</option>
+          <option value="wishlist">Wishlist</option>
+        </select>
+      </div>
+      <div class="field" data-purchase-group>
+        <label for="purchase-date">Purchase date</label>
+        <input id="purchase-date" name="purchase_date" type="date" required />
+        <p class="hint">Required for backlog entries.</p>
+      </div>
+      <div class="field">
+        <label for="start-date">Started playing</label>
+        <input id="start-date" name="start_date" type="date" />
+      </div>
+      <div class="field">
+        <label for="finish-date">Finished playing</label>
+        <input id="finish-date" name="finish_date" type="date" />
+      </div>
+      <div class="field">
+        <label for="steam-app-id">Steam App ID (optional)</label>
+        <input id="steam-app-id" name="steam_app_id" type="text" />
+        <p class="hint" id="steam-app-id-status">Add an App ID to fetch genres and artwork.</p>
+      </div>
+      <fieldset>
+        <legend>Play styles</legend>
+        <div class="checkboxes">
+          <label><input type="checkbox" value="Single Player" class="mode-option" /> Single Player</label>
+          <label><input type="checkbox" value="Co-op" class="mode-option" /> Co-op</label>
+          <label><input type="checkbox" value="Multiplayer" class="mode-option" /> Multiplayer</label>
+        </div>
+      </fieldset>
+      <div class="field">
+        <label>Detected genres</label>
+        <div id="detected-genres" class="tag-list tag-list-inline"></div>
+        <p class="hint" id="detected-genres-hint">Genres will appear after fetching from Steam.</p>
+      </div>
+      <div class="field">
+        <label>Steam artwork</label>
+        <div
+          id="icon-preview"
+          class="art-preview"
+          data-default-message="Artwork will appear after fetching from Steam."
+        >
+          Artwork will appear after fetching from Steam.
+        </div>
+      </div>
+      <button type="submit">Add game</button>
+      <p class="hint" id="game-form-message"></p>
+    </form>
+  </section>
+{% endblock %}

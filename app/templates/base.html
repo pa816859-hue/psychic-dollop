@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Game Backlog Companion{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body class="steam-surface" data-page="{{ page_id|default('') }}">
+    <header class="steam-header">
+      <nav class="top-bar">
+        <div class="brand"><a href="{{ url_for('core.home') }}">Deck Commander</a></div>
+        <ul class="nav-links">
+          <li><a href="{{ url_for('core.add_game_page') }}">Add Games</a></li>
+          <li><a href="{{ url_for('core.library_page') }}">Library</a></li>
+          <li><a href="{{ url_for('core.rankings_page') }}">ELO</a></li>
+          <li><a href="{{ url_for('core.sessions_page') }}">Sessions</a></li>
+          <li><a href="{{ url_for('core.settings_page') }}">Settings</a></li>
+        </ul>
+      </nav>
+      {% block header_extra %}{% endblock %}
+    </header>
+
+    <main class="steam-main">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="steam-footer">
+      <p>Crafted with a SteamOS-inspired interface to keep your queue fresh.</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

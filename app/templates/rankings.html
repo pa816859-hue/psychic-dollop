@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}ELO Rankings · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel" id="elo">
+    <div class="panel-heading">
+      <h2>Pairwise ELO ranking</h2>
+      <p>Each matchup is unique, ensuring balanced comparisons.</p>
+    </div>
+    <div class="field">
+      <label for="ranking-status">Compare list</label>
+      <select id="ranking-status" name="ranking_status">
+        <option value="backlog">Backlog</option>
+        <option value="wishlist">Wishlist</option>
+      </select>
+    </div>
+    <div class="elo-panel single">
+      <p class="pair-note">Matchups refresh automatically as you choose winners.</p>
+      <div id="ranking-pair" class="pair"></div>
+    </div>
+    <div>
+      <h3 id="ranking-table-title">Current ranking</h3>
+      <ol id="ranking-list" class="ranking"></ol>
+    </div>
+  </section>
+{% endblock %}

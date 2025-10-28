@@ -18,6 +18,9 @@ class Game(db.Model):
     icon_url = db.Column(db.String(512), nullable=True)
     short_description = db.Column(db.Text, nullable=True)
     elo_rating = db.Column(db.Float, nullable=False, default=1500.0)
+    purchase_date = db.Column(db.Date, nullable=True)
+    start_date = db.Column(db.Date, nullable=True)
+    finish_date = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def to_dict(self) -> dict:
@@ -31,6 +34,13 @@ class Game(db.Model):
             "icon_url": self.icon_url,
             "short_description": self.short_description,
             "elo_rating": self.elo_rating,
+            "purchase_date": self.purchase_date.isoformat()
+            if self.purchase_date
+            else None,
+            "start_date": self.start_date.isoformat() if self.start_date else None,
+            "finish_date": self.finish_date.isoformat()
+            if self.finish_date
+            else None,
             "created_at": self.created_at.isoformat(),
         }
 

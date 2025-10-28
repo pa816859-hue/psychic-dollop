@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Settings · Deck Commander{% endblock %}
+
+{% block content %}
+  <section class="panel" id="steam-tools">
+    <div class="panel-heading">
+      <h2>Steam settings</h2>
+      <p>Configure API access, import your library, or inspect app metadata.</p>
+    </div>
+    <div class="columns">
+      <div>
+        <h3>Lookup by App ID</h3>
+        <form id="steam-form">
+          <div class="field">
+            <label for="steam-search-id">Steam App ID</label>
+            <input id="steam-search-id" type="text" placeholder="570" />
+          </div>
+          <button type="submit">Fetch details</button>
+        </form>
+        <pre id="steam-result" class="steam-result"></pre>
+      </div>
+      <div>
+        <h3>Import owned games</h3>
+        <form id="library-import-form">
+          <div class="field">
+            <label for="library-steam-id">Steam ID or vanity URL</label>
+            <input
+              id="library-steam-id"
+              name="steam_id"
+              type="text"
+              placeholder="7656119... or vanity"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="library-api-key">Steam Web API key</label>
+            <input
+              id="library-api-key"
+              name="api_key"
+              type="text"
+              placeholder="Your API key"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="library-status">Import to list</label>
+            <select id="library-status" name="status">
+              <option value="backlog">Backlog</option>
+              <option value="wishlist">Wishlist</option>
+            </select>
+          </div>
+          <button type="submit">Import library</button>
+        </form>
+        <p class="hint" id="library-import-result"></p>
+        <h3>Import wishlist</h3>
+        <form id="wishlist-import-form">
+          <div class="field">
+            <label for="wishlist-steam-id">Steam ID or vanity URL</label>
+            <input
+              id="wishlist-steam-id"
+              name="steam_id"
+              type="text"
+              placeholder="7656119... or vanity"
+              required
+            />
+          </div>
+          <div class="field">
+            <label for="wishlist-api-key">Steam Web API key (optional)</label>
+            <input
+              id="wishlist-api-key"
+              name="api_key"
+              type="text"
+              placeholder="Needed for vanity IDs"
+            />
+          </div>
+          <div class="field">
+            <label for="wishlist-status">Import to list</label>
+            <select id="wishlist-status" name="status">
+              <option value="wishlist">Wishlist</option>
+              <option value="backlog">Backlog</option>
+            </select>
+          </div>
+          <button type="submit">Import wishlist</button>
+        </form>
+        <p class="hint" id="wishlist-import-result"></p>
+      </div>
+    </div>
+  </section>
+{% endblock %}
