@@ -39,7 +39,7 @@ async function fetchAndCacheGames({ force = false } = {}) {
   return games;
 }
 
-function createGameCard(game, { onDelete } = {}) {
+function createGameCard(game, { onDelete, onUpdate } = {}) {
   const li = document.createElement("li");
   li.className = "game-card";
 
@@ -55,9 +55,23 @@ function createGameCard(game, { onDelete } = {}) {
     header.appendChild(art);
   }
 
+  const headerContent = document.createElement("div");
+  headerContent.className = "game-card-header-content";
+
   const title = document.createElement("h4");
-  title.textContent = game.title;
-  header.appendChild(title);
+  const detailLink = document.createElement("a");
+  detailLink.href = `/games/${game.id}`;
+  detailLink.className = "game-card-title-link";
+  detailLink.textContent = game.title;
+  title.appendChild(detailLink);
+  headerContent.appendChild(title);
+
+  const statusBadge = document.createElement("span");
+  statusBadge.className = `game-card-status game-card-status--${game.status}`;
+  statusBadge.textContent = game.status === "backlog" ? "Backlog" : "Wishlist";
+  headerContent.appendChild(statusBadge);
+
+  header.appendChild(headerContent);
   li.appendChild(header);
 
   const rating = document.createElement("div");
@@ -97,7 +111,7 @@ function createGameCard(game, { onDelete } = {}) {
   }
 
   const actions = document.createElement("div");
-  actions.className = "meta";
+  actions.className = "game-card-actions";
   if (game.steam_app_id) {
     const link = document.createElement("a");
     link.href = `https://store.steampowered.com/app/${game.steam_app_id}/`;
@@ -106,6 +120,140 @@ function createGameCard(game, { onDelete } = {}) {
     link.textContent = "Steam";
     actions.appendChild(link);
   }
+
+  const editForm = document.createElement("form");
+  editForm.className = "game-edit-form hidden";
+
+  const editFields = document.createElement("div");
+  editFields.className = "game-edit-grid";
+
+  function buildField(labelText, inputElement) {
+    const wrapper = document.createElement("label");
+    wrapper.className = "game-edit-field";
+    const caption = document.createElement("span");
+    caption.className = "game-edit-label";
+    caption.textContent = labelText;
+    wrapper.appendChild(caption);
+    wrapper.appendChild(inputElement);
+    return wrapper;
+  }
+
+  const titleInput = document.createElement("input");
+  titleInput.type = "text";
+  titleInput.name = "title";
+  titleInput.required = true;
+  titleInput.value = game.title;
+  editFields.appendChild(buildField("Title", titleInput));
+
+  const statusSelect = document.createElement("select");
+  statusSelect.name = "status";
+  [
+    { value: "backlog", label: "Backlog" },
+    { value: "wishlist", label: "Wishlist" },
+  ].forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    statusSelect.appendChild(option);
+  });
+  statusSelect.value = game.status;
+  editFields.appendChild(buildField("List", statusSelect));
+
+  const purchaseInput = document.createElement("input");
+  purchaseInput.type = "date";
+  purchaseInput.name = "purchase_date";
+  if (game.purchase_date) {
+    purchaseInput.value = game.purchase_date;
+  }
+  const purchaseField = buildField("Purchase date", purchaseInput);
+  purchaseField.dataset.editPurchase = "";
+  const purchaseHint = document.createElement("small");
+  purchaseHint.className = "game-edit-hint";
+  purchaseHint.textContent = "Required for backlog entries.";
+  purchaseField.appendChild(purchaseHint);
+  editFields.appendChild(purchaseField);
+
+  const startInput = document.createElement("input");
+  startInput.type = "date";
+  startInput.name = "start_date";
+  if (game.start_date) {
+    startInput.value = game.start_date;
+  }
+  editFields.appendChild(buildField("Started", startInput));
+
+  const finishInput = document.createElement("input");
+  finishInput.type = "date";
+  finishInput.name = "finish_date";
+  if (game.finish_date) {
+    finishInput.value = game.finish_date;
+  }
+  editFields.appendChild(buildField("Finished", finishInput));
+
+  editForm.appendChild(editFields);
+
+  const editMessage = document.createElement("p");
+  editMessage.className = "hint game-edit-message";
+  editForm.appendChild(editMessage);
+
+  const editButtons = document.createElement("div");
+  editButtons.className = "game-edit-actions";
+  const saveButton = document.createElement("button");
+  saveButton.type = "submit";
+  saveButton.textContent = "Save";
+  editButtons.appendChild(saveButton);
+
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "secondary";
+  cancelButton.textContent = "Cancel";
+  editButtons.appendChild(cancelButton);
+  editForm.appendChild(editButtons);
+
+  function updateEditPurchaseRequirement() {
+    const isBacklog = statusSelect.value === "backlog";
+    purchaseInput.required = isBacklog;
+    purchaseField.classList.toggle("is-optional", !isBacklog);
+    if (isBacklog) {
+      applyDefaultDateIfEmpty(purchaseInput);
+    } else {
+      purchaseInput.value = "";
+    }
+  }
+
+  function resetEditForm() {
+    titleInput.value = game.title;
+    statusSelect.value = game.status;
+    purchaseInput.value = game.purchase_date || "";
+    startInput.value = game.start_date || "";
+    finishInput.value = game.finish_date || "";
+    editMessage.textContent = "";
+    updateEditPurchaseRequirement();
+  }
+
+  statusSelect.addEventListener("change", () => {
+    const wasRequired = purchaseInput.required;
+    updateEditPurchaseRequirement();
+    if (!wasRequired && purchaseInput.required && !purchaseInput.value) {
+      applyDefaultDateIfEmpty(purchaseInput);
+    }
+  });
+
+  cancelButton.addEventListener("click", () => {
+    resetEditForm();
+    editForm.classList.add("hidden");
+  });
+
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.textContent = "Edit";
+  editButton.addEventListener("click", () => {
+    resetEditForm();
+    editForm.classList.toggle("hidden");
+    if (!editForm.classList.contains("hidden")) {
+      titleInput.focus();
+    }
+  });
+  actions.appendChild(editButton);
 
   if (typeof onDelete === "function") {
     const deleteBtn = document.createElement("button");
@@ -127,6 +275,62 @@ function createGameCard(game, { onDelete } = {}) {
   if (actions.children.length > 0) {
     li.appendChild(actions);
   }
+
+  let saving = false;
+
+  editForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (saving) return;
+    const payload = {
+      title: titleInput.value.trim(),
+      status: statusSelect.value,
+      purchase_date: purchaseInput.value ? purchaseInput.value : null,
+      start_date: startInput.value ? startInput.value : null,
+      finish_date: finishInput.value ? finishInput.value : null,
+    };
+
+    if (!payload.title) {
+      editMessage.textContent = "Title is required.";
+      titleInput.focus();
+      return;
+    }
+
+    if (payload.status === "wishlist") {
+      payload.purchase_date = null;
+    } else if (!payload.purchase_date) {
+      editMessage.textContent = "Purchase date is required for backlog entries.";
+      purchaseInput.focus();
+      return;
+    }
+
+    saving = true;
+    saveButton.disabled = true;
+    cancelButton.disabled = true;
+    editMessage.textContent = "Saving...";
+
+    try {
+      const updatedGame = await fetchJSON(`/api/games/${game.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      editMessage.textContent = "Game updated.";
+      editForm.classList.add("hidden");
+      if (typeof onUpdate === "function") {
+        await onUpdate(updatedGame);
+      }
+    } catch (error) {
+      editMessage.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      saving = false;
+      saveButton.disabled = false;
+      cancelButton.disabled = false;
+    }
+  });
+
+  updateEditPurchaseRequirement();
+
+  li.appendChild(editForm);
 
   return li;
 }
@@ -176,11 +380,10 @@ async function initAddGamePage() {
     if (purchaseGroup) {
       purchaseGroup.classList.toggle("is-optional", !isBacklog);
     }
-    if (isBacklog && !purchaseInput.value) {
+    if (isBacklog) {
       applyDefaultDateIfEmpty(purchaseInput);
-    }
-    if (!isBacklog && purchaseInput.value) {
-      // Leave the value intact in case the user wants to keep it
+    } else {
+      purchaseInput.value = "";
     }
   }
 
@@ -392,14 +595,17 @@ async function initAddGamePage() {
       }
       await fetchAndCacheGames({ force: true });
       updatePurchaseRequirement();
-      applyDefaultDateIfEmpty(purchaseInput);
+      if (statusSelect.value === "backlog") {
+        applyDefaultDateIfEmpty(purchaseInput);
+      } else if (purchaseInput) {
+        purchaseInput.value = "";
+      }
     } catch (error) {
       message.textContent = error instanceof Error ? error.message : String(error);
     }
   });
 
   updatePurchaseRequirement();
-  applyDefaultDateIfEmpty(purchaseInput);
   clearSteamMetadataPreview();
 }
 
@@ -419,7 +625,7 @@ async function initLibraryPage() {
     }
 
     games.forEach((game) => {
-      const card = createGameCard(game, { onDelete: renderLists });
+      const card = createGameCard(game, { onDelete: renderLists, onUpdate: renderLists });
       if (game.status === "backlog" && backlogList) {
         backlogList.appendChild(card);
       } else if (wishlistList) {
@@ -641,209 +847,53 @@ async function initSessionsPage() {
   const form = document.getElementById("session-form");
   const message = document.getElementById("session-form-message");
   const sessionsTableBody = document.querySelector("#sessions-table tbody");
-  const sessionGameInput = document.getElementById("session-game-input");
-  const sessionGameIdInput = document.getElementById("session-game-id");
-  const sessionGameOptions = document.getElementById("session-game-options");
+  const sessionGameSelect = document.getElementById("session-game-select");
+  const sessionGameTitleInput = document.getElementById("session-game-title");
   const sessionDateInput = document.getElementById("session-date");
-  if (!form || !sessionsTableBody || !sessionGameInput || !sessionGameOptions) return;
+  if (!form || !sessionsTableBody || !sessionGameSelect || !sessionGameTitleInput) return;
 
-  sessionGameOptions.setAttribute("role", "listbox");
+  let userEditedTitle = false;
 
-  let sessionGameMatches = [];
-  let sessionGameHighlightIndex = -1;
-
-  function updateSessionGameHighlight() {
-    const items = Array.from(sessionGameOptions.querySelectorAll("li"));
-    items.forEach((item, index) => {
-      if (index === sessionGameHighlightIndex) {
-        item.classList.add("is-active");
-        item.setAttribute("aria-selected", "true");
-        item.scrollIntoView({ block: "nearest" });
-      } else {
-        item.classList.remove("is-active");
-        item.setAttribute("aria-selected", "false");
-      }
-    });
+  function resetTitleEditState() {
+    userEditedTitle = false;
+    delete sessionGameTitleInput.dataset.edited;
   }
 
-  function clearSessionGameHighlight() {
-    sessionGameHighlightIndex = -1;
-    updateSessionGameHighlight();
-  }
-
-  function hideSessionGameOptions() {
-    sessionGameOptions.classList.add("hidden");
-    sessionGameOptions.innerHTML = "";
-    sessionGameMatches = [];
-    clearSessionGameHighlight();
-  }
-
-  function selectSessionGame(game) {
-    sessionGameInput.value = game.title;
-    if (sessionGameIdInput) {
-      sessionGameIdInput.value = game.id;
-    }
-    hideSessionGameOptions();
-  }
-
-  function renderSessionGameOptions(query = "") {
-    const normalized = query.trim().toLowerCase();
-    const matches = state.cachedGames
-      .filter((game) => {
-        if (!normalized) return true;
-        const titleMatch = game.title.toLowerCase().includes(normalized);
-        const idMatch = String(game.id).startsWith(normalized);
-        return titleMatch || idMatch;
-      })
-      .slice(0, 10);
-
-    sessionGameOptions.innerHTML = "";
-    if (matches.length === 0) {
-      sessionGameOptions.classList.add("hidden");
-      sessionGameMatches = [];
-      clearSessionGameHighlight();
-      return;
-    }
-
-    sessionGameMatches = matches;
-    if (matches.length > 0 && normalized) {
-      sessionGameHighlightIndex = 0;
+  sessionGameTitleInput.addEventListener("input", () => {
+    userEditedTitle = sessionGameTitleInput.value.trim().length > 0;
+    if (userEditedTitle) {
+      sessionGameTitleInput.dataset.edited = "true";
     } else {
-      clearSessionGameHighlight();
+      delete sessionGameTitleInput.dataset.edited;
     }
+  });
 
-    matches.forEach((game, index) => {
-      const item = document.createElement("li");
-      item.className = "searchable-option";
-      item.tabIndex = 0;
-      item.setAttribute("role", "option");
-      item.dataset.index = String(index);
-
-      const inner = document.createElement("div");
-      inner.className = "searchable-option__inner";
-
-      if (game.icon_url) {
-        const art = document.createElement("img");
-        art.src = game.icon_url;
-        art.alt = "";
-        art.loading = "lazy";
-        art.className = "searchable-option__art";
-        inner.appendChild(art);
+  sessionGameSelect.addEventListener("change", () => {
+    const selectedOption = sessionGameSelect.selectedOptions[0];
+    if (selectedOption && selectedOption.value) {
+      if (!userEditedTitle) {
+        sessionGameTitleInput.value = selectedOption.textContent || "";
       }
+    } else if (!userEditedTitle) {
+      sessionGameTitleInput.value = "";
+    }
+  });
 
-      const text = document.createElement("div");
-      text.className = "searchable-option__text";
+  async function populateGameOptions({ force = false } = {}) {
+    const games = await fetchAndCacheGames({ force });
+    sessionGameSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a game from your library";
+    sessionGameSelect.appendChild(placeholder);
 
-      const title = document.createElement("span");
-      title.className = "searchable-option__title";
-      title.textContent = game.title;
-      text.appendChild(title);
-
-      const status = document.createElement("span");
-      status.className = "searchable-option__status";
-      const listLabel = game.status === "backlog" ? "Backlog" : "Wishlist";
-      status.textContent = `${listLabel} • #${game.id}`;
-      text.appendChild(status);
-
-      inner.appendChild(text);
-      item.appendChild(inner);
-
-      item.addEventListener("mouseenter", () => {
-        sessionGameHighlightIndex = index;
-        updateSessionGameHighlight();
-      });
-
-      item.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        selectSessionGame(game);
-        sessionGameInput.focus();
-      });
-
-      item.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          selectSessionGame(game);
-          sessionGameInput.focus();
-        } else if (event.key === "ArrowDown") {
-          event.preventDefault();
-          const next = Math.min(index + 1, matches.length - 1);
-          const nextItem = sessionGameOptions.querySelector(`li[data-index="${next}"]`);
-          sessionGameHighlightIndex = next;
-          updateSessionGameHighlight();
-          (nextItem || sessionGameInput).focus();
-        } else if (event.key === "ArrowUp") {
-          event.preventDefault();
-          const prev = index - 1 < 0 ? -1 : index - 1;
-          if (prev === -1) {
-            clearSessionGameHighlight();
-            sessionGameInput.focus();
-          } else {
-            const prevItem = sessionGameOptions.querySelector(`li[data-index="${prev}"]`);
-            sessionGameHighlightIndex = prev;
-            updateSessionGameHighlight();
-            (prevItem || sessionGameInput).focus();
-          }
-        } else if (event.key === "Escape") {
-          hideSessionGameOptions();
-          sessionGameInput.focus();
-        }
-      });
-
-      sessionGameOptions.appendChild(item);
+    games.forEach((game) => {
+      const option = document.createElement("option");
+      option.value = game.id;
+      option.textContent = game.title;
+      sessionGameSelect.appendChild(option);
     });
-
-    sessionGameOptions.classList.remove("hidden");
-    updateSessionGameHighlight();
   }
-
-  sessionGameInput.addEventListener("input", () => {
-    if (sessionGameIdInput) {
-      sessionGameIdInput.value = "";
-    }
-    renderSessionGameOptions(sessionGameInput.value);
-  });
-
-  sessionGameInput.addEventListener("focus", () => {
-    renderSessionGameOptions(sessionGameInput.value);
-  });
-
-  sessionGameInput.addEventListener("blur", () => {
-    setTimeout(() => hideSessionGameOptions(), 120);
-  });
-
-  sessionGameInput.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown") {
-      if (sessionGameMatches.length > 0) {
-        event.preventDefault();
-        const nextIndex =
-          sessionGameHighlightIndex + 1 >= sessionGameMatches.length
-            ? 0
-            : sessionGameHighlightIndex + 1;
-        sessionGameHighlightIndex = nextIndex;
-        updateSessionGameHighlight();
-      }
-    } else if (event.key === "ArrowUp") {
-      if (sessionGameMatches.length > 0) {
-        event.preventDefault();
-        const nextIndex =
-          sessionGameHighlightIndex <= 0
-            ? sessionGameMatches.length - 1
-            : sessionGameHighlightIndex - 1;
-        sessionGameHighlightIndex = nextIndex;
-        updateSessionGameHighlight();
-      }
-    } else if (event.key === "Enter") {
-      if (sessionGameHighlightIndex >= 0) {
-        event.preventDefault();
-        const selected = sessionGameMatches[sessionGameHighlightIndex];
-        if (selected) {
-          selectSessionGame(selected);
-        }
-      }
-    } else if (event.key === "Escape") {
-      hideSessionGameOptions();
-    }
-  });
 
   async function loadSessions() {
     try {
@@ -887,15 +937,24 @@ async function initSessionsPage() {
     event.preventDefault();
     const formData = new FormData(form);
     const payload = {
-      game_title: formData.get("game_title"),
       session_date: formData.get("session_date"),
       playtime_minutes: formData.get("playtime_minutes"),
       sentiment: formData.get("sentiment"),
       comment: formData.get("comment"),
+      game_title: String(formData.get("game_title") || "").trim(),
     };
 
-    if (sessionGameIdInput?.value) {
-      payload.game_id = sessionGameIdInput.value;
+    const selectedOption = sessionGameSelect.selectedOptions[0];
+    if (selectedOption && selectedOption.value) {
+      payload.game_id = selectedOption.value;
+      if (!payload.game_title) {
+        payload.game_title = (selectedOption.textContent || "").trim();
+      }
+    }
+
+    if (!payload.game_title) {
+      message.textContent = "Game title is required.";
+      return;
     }
 
     try {
@@ -906,10 +965,8 @@ async function initSessionsPage() {
       });
       message.textContent = "Session logged.";
       form.reset();
-      hideSessionGameOptions();
-      if (sessionGameIdInput) {
-        sessionGameIdInput.value = "";
-      }
+      resetTitleEditState();
+      await populateGameOptions();
       applyDefaultDateIfEmpty(sessionDateInput);
       await loadSessions();
     } catch (error) {
@@ -917,8 +974,8 @@ async function initSessionsPage() {
     }
   });
 
-  await fetchAndCacheGames({ force: true });
-  renderSessionGameOptions("");
+  await populateGameOptions({ force: true });
+  resetTitleEditState();
   applyDefaultDateIfEmpty(sessionDateInput);
   await loadSessions();
 }

@@ -50,6 +50,48 @@ def sessions_page():
     return render_template("sessions.html", page_id="sessions")
 
 
+@bp.route("/games/<int:game_id>")
+def game_detail_page(game_id: int):
+    game = Game.query.get_or_404(game_id)
+    sessions = (
+        SessionLog.query.filter(
+            (SessionLog.game_id == game.id) | (SessionLog.game_title == game.title)
+        )
+        .order_by(SessionLog.session_date.desc())
+        .all()
+    )
+
+    total_minutes = sum(session.playtime_minutes for session in sessions)
+    sentiment_weights = {"good": 100.0, "mediocre": 50.0, "bad": 0.0}
+    weighted_sum = sum(
+        sentiment_weights.get(session.sentiment, 50.0) * session.playtime_minutes
+        for session in sessions
+    )
+    total_weight = sum(
+        session.playtime_minutes
+        for session in sessions
+        if session.sentiment in sentiment_weights
+    )
+    weighted_score = weighted_sum / total_weight if total_weight else None
+    score_color = _score_to_color(weighted_score)
+    score_percent = (
+        max(0.0, min(100.0, weighted_score)) if weighted_score is not None else 0.0
+    )
+    total_hours = total_minutes / 60 if total_minutes else 0.0
+
+    return render_template(
+        "game_detail.html",
+        page_id="game-detail",
+        game=game,
+        sessions=sessions,
+        weighted_score=weighted_score,
+        score_color=score_color,
+        score_percent=score_percent,
+        total_minutes=total_minutes,
+        total_hours=total_hours,
+    )
+
+
 @bp.route("/settings")
 def settings_page():
     return render_template("settings.html", page_id="settings")
@@ -311,6 +353,30 @@ def games_resource(game_id: int):
     db.session.commit()
 
     return jsonify(game.to_dict())
+
+
+def _interpolate_color(color_a: tuple[int, int, int], color_b: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
+    factor = max(0.0, min(1.0, factor))
+    return tuple(
+        round(component_a + (component_b - component_a) * factor)
+        for component_a, component_b in zip(color_a, color_b)
+    )
+
+
+def _score_to_color(score: float | None) -> str:
+    if score is None:
+        return "#7f9cbc"
+
+    red = (217, 83, 79)
+    yellow = (240, 173, 78)
+    green = (92, 184, 92)
+
+    if score <= 50:
+        blend = _interpolate_color(red, yellow, score / 50 if score > 0 else 0)
+    else:
+        blend = _interpolate_color(yellow, green, (score - 50) / 50 if score < 100 else 1)
+
+    return "#%02x%02x%02x" % blend
 
 
 def _available_pairs(games: Iterable[Game], status: str) -> list[Tuple[Game, Game]]:
