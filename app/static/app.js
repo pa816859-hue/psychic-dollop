@@ -39,6 +39,91 @@ async function fetchAndCacheGames({ force = false } = {}) {
   return games;
 }
 
+async function initBacklogImportPage() {
+  const form = document.getElementById("backlog-import-form");
+  if (!form) return;
+
+  const fileInput = document.getElementById("backlog-import-file");
+  const result = document.getElementById("backlog-import-result");
+  const summary = document.getElementById("backlog-import-summary");
+  const importedList = document.getElementById("backlog-import-imported");
+  const skippedList = document.getElementById("backlog-import-skipped");
+
+  function resetSummary() {
+    if (importedList) importedList.innerHTML = "";
+    if (skippedList) skippedList.innerHTML = "";
+    summary?.classList.add("hidden");
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+      if (result) {
+        result.textContent = "Choose a CSV file to import.";
+      }
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    if (result) {
+      result.textContent = "Importing backlog...";
+    }
+    resetSummary();
+
+    try {
+      const payload = await fetchJSON("/api/import/backlog", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (result) {
+        result.textContent = `Imported ${payload.imported_count} game(s), skipped ${payload.skipped_count}.`;
+      }
+
+      if (Array.isArray(payload.imported) && importedList) {
+        payload.imported.forEach((game) => {
+          const item = document.createElement("li");
+          item.innerHTML = `<strong>${game.title}</strong>${
+            game.steam_app_id ? ` · Steam App ID ${game.steam_app_id}` : ""
+          }`;
+          importedList.appendChild(item);
+        });
+      }
+
+      if (Array.isArray(payload.skipped) && skippedList) {
+        payload.skipped.forEach((entry) => {
+          const item = document.createElement("li");
+          const label = entry.title || `Row ${entry.row}`;
+          const rowInfo = entry.title && entry.row ? ` (Row ${entry.row})` : "";
+          const reason = entry.reason ? ` — ${entry.reason}` : "";
+          item.innerHTML = `<strong>${label}${rowInfo}</strong>${reason}`;
+          skippedList.appendChild(item);
+        });
+      }
+
+      if (
+        summary &&
+        ((payload.imported && payload.imported.length > 0) ||
+          (payload.skipped && payload.skipped.length > 0))
+      ) {
+        summary.classList.remove("hidden");
+      }
+
+      form.reset();
+      if (fileInput) {
+        fileInput.value = "";
+      }
+      await fetchAndCacheGames({ force: true });
+    } catch (error) {
+      if (result) {
+        result.textContent = error instanceof Error ? error.message : String(error);
+      }
+    }
+  });
+}
+
 function createGameCard(game, { onDelete, onUpdate } = {}) {
   const li = document.createElement("li");
   li.className = "game-card";
@@ -1068,6 +1153,7 @@ async function initSettingsPage() {
 
 async function bootstrap() {
   await Promise.all([
+    initBacklogImportPage(),
     initAddGamePage(),
     initLibraryPage(),
     initRankingsPage(),

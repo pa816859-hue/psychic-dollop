@@ -246,6 +246,53 @@ button:focus-visible {
   }
 }
 
+.import-summary {
+  position: relative;
+  z-index: 1;
+  margin-top: 1.5rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 720px) {
+  .import-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.import-summary__column {
+  background: rgba(7, 17, 28, 0.75);
+  border: 1px solid rgba(26, 159, 255, 0.18);
+  border-radius: 14px;
+  padding: 1.25rem;
+  backdrop-filter: blur(8px);
+}
+
+.import-summary__column h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.import-summary__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.import-summary__list li {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.import-summary__list li strong {
+  color: var(--text);
+}
+
 .field,
 fieldset {
   position: relative;
