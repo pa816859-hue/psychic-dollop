@@ -841,7 +841,9 @@ async function initAddGamePage() {
       if (steamAppIdStatus) {
         steamAppIdStatus.textContent = defaultSteamStatusMessage;
       }
-      thoughtsInput?.value = "";
+      if (thoughtsInput) {
+        thoughtsInput.value = "";
+      }
       await fetchAndCacheGames({ force: true });
       updatePurchaseRequirement();
       if (statusSelect.value === "backlog") {
