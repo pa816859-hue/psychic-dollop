@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import random
 import threading
 import time
@@ -20,6 +21,8 @@ from . import db
 from .models import Comparison, Game, SessionLog
 
 bp = Blueprint("core", __name__)
+
+logger = logging.getLogger(__name__)
 
 
 class SteamMetadataError(Exception):
@@ -371,6 +374,36 @@ def _parse_modes_field(value: str | None) -> list[str]:
     return [segment for segment in parts if segment]
 
 
+def _normalize_steam_app_id_value(value: str | int | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    match = re.search(r"\d+", text)
+    if not match:
+        return None
+    return match.group(0)
+
+
+def _extract_steam_app_id_from_row(row: dict) -> tuple[str | None, str | None]:
+    candidate_keys = (
+        "Steam App ID",
+        "steam_app_id",
+        "AppID",
+        "App Id",
+        "App ID",
+        "Game_ID",
+        "Game ID",
+        "ID",
+    )
+    for key in candidate_keys:
+        app_id = _normalize_steam_app_id_value(row.get(key))
+        if app_id:
+            return app_id, key
+    return None, None
+
+
 @bp.route("/api/import/backlog", methods=["POST"])
 def import_backlog_from_csv():
     upload = request.files.get("file")
@@ -392,15 +425,28 @@ def import_backlog_from_csv():
 
     created_games: list[Game] = []
     skipped: list[dict] = []
+    events: list[dict] = []
+
+    logger.info(
+        "Backlog CSV import started with columns: %s", ", ".join(reader.fieldnames)
+    )
 
     for row_index, row in enumerate(reader, start=2):
         title = (row.get("Title") or row.get("title") or "").strip()
         if not title:
-            skipped.append({"row": row_index, "title": None, "reason": "Missing title."})
+            reason = "Missing title."
+            event = {"row": row_index, "title": None, "status": "skipped", "reason": reason}
+            events.append(event)
+            skipped.append({"row": row_index, "title": None, "reason": reason})
+            logger.warning("Backlog row %s skipped: %s", row_index, reason)
             continue
 
         if Game.query.filter_by(title=title).first():
-            skipped.append({"row": row_index, "title": title, "reason": "Already in library."})
+            reason = "Already in library."
+            event = {"row": row_index, "title": title, "status": "skipped", "reason": reason}
+            events.append(event)
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.info("Backlog row %s skipped (duplicate): %s", row_index, title)
             continue
 
         try:
@@ -408,23 +454,63 @@ def import_backlog_from_csv():
             start_date = _parse_csv_date(row.get("Date_Started") or row.get("Date Started"), "start date")
             finish_date = _parse_csv_date(row.get("Date_Completed") or row.get("Date Completed"), "completion date")
         except ValueError as exc:
-            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            reason = str(exc)
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.warning("Backlog row %s skipped (date error): %s", row_index, reason)
             continue
 
-        try:
-            steam_app_id = _search_steam_app_id(title)
-        except SteamMetadataError as exc:
-            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
-            continue
+        steam_app_id, app_id_key = _extract_steam_app_id_from_row(row)
+        app_id_source = f"csv:{app_id_key}" if app_id_key else "search"
 
         if not steam_app_id:
-            skipped.append({"row": row_index, "title": title, "reason": "Steam app not found."})
+            try:
+                steam_app_id = _search_steam_app_id(title)
+            except SteamMetadataError as exc:
+                reason = str(exc)
+                events.append({
+                    "row": row_index,
+                    "title": title,
+                    "status": "skipped",
+                    "reason": reason,
+                })
+                skipped.append({"row": row_index, "title": title, "reason": reason})
+                logger.error(
+                    "Backlog row %s skipped (search error): %s", row_index, reason
+                )
+                continue
+
+        if not steam_app_id:
+            reason = "Steam app not found."
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.warning("Backlog row %s skipped: %s", row_index, reason)
             continue
 
         try:
             metadata = _fetch_steam_metadata(steam_app_id)
         except SteamMetadataError as exc:
-            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            reason = str(exc)
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.error(
+                "Backlog row %s skipped (metadata error): %s", row_index, reason
+            )
             continue
 
         game = Game(
@@ -443,6 +529,22 @@ def import_backlog_from_csv():
 
         db.session.add(game)
         created_games.append(game)
+        events.append(
+            {
+                "row": row_index,
+                "title": title,
+                "status": "imported",
+                "steam_app_id": steam_app_id,
+                "source": app_id_source,
+            }
+        )
+        logger.info(
+            "Backlog row %s imported: %s (app_id=%s via %s)",
+            row_index,
+            title,
+            steam_app_id,
+            app_id_source,
+        )
 
     if created_games:
         try:
@@ -455,12 +557,20 @@ def import_backlog_from_csv():
 
     imported = [game.to_dict() for game in created_games]
 
+    logger.info(
+        "Backlog CSV import finished: %s imported, %s skipped",
+        len(imported),
+        len(skipped),
+    )
+
     return jsonify(
         {
+            "status": "completed",
             "imported_count": len(imported),
             "skipped_count": len(skipped),
             "imported": imported,
             "skipped": skipped,
+            "events": events,
         }
     )
 
@@ -486,31 +596,84 @@ def import_wishlist_from_csv():
 
     created_games: list[Game] = []
     skipped: list[dict] = []
+    events: list[dict] = []
+
+    logger.info(
+        "Wishlist CSV import started with columns: %s", ", ".join(reader.fieldnames)
+    )
 
     for row_index, row in enumerate(reader, start=2):
         title = (row.get("Title") or row.get("title") or "").strip()
         if not title:
-            skipped.append({"row": row_index, "title": None, "reason": "Missing title."})
+            reason = "Missing title."
+            events.append({
+                "row": row_index,
+                "title": None,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": None, "reason": reason})
+            logger.warning("Wishlist row %s skipped: %s", row_index, reason)
             continue
 
         if Game.query.filter_by(title=title).first():
-            skipped.append({"row": row_index, "title": title, "reason": "Already in library."})
+            reason = "Already in library."
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.info("Wishlist row %s skipped (duplicate): %s", row_index, title)
             continue
 
-        try:
-            steam_app_id = _search_steam_app_id(title)
-        except SteamMetadataError as exc:
-            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
-            continue
+        steam_app_id, app_id_key = _extract_steam_app_id_from_row(row)
+        app_id_source = f"csv:{app_id_key}" if app_id_key else "search"
 
         if not steam_app_id:
-            skipped.append({"row": row_index, "title": title, "reason": "Steam app not found."})
+            try:
+                steam_app_id = _search_steam_app_id(title)
+            except SteamMetadataError as exc:
+                reason = str(exc)
+                events.append({
+                    "row": row_index,
+                    "title": title,
+                    "status": "skipped",
+                    "reason": reason,
+                })
+                skipped.append({"row": row_index, "title": title, "reason": reason})
+                logger.error(
+                    "Wishlist row %s skipped (search error): %s", row_index, reason
+                )
+                continue
+
+        if not steam_app_id:
+            reason = "Steam app not found."
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.warning("Wishlist row %s skipped: %s", row_index, reason)
             continue
 
         try:
             metadata = _fetch_steam_metadata(steam_app_id)
         except SteamMetadataError as exc:
-            skipped.append({"row": row_index, "title": title, "reason": str(exc)})
+            reason = str(exc)
+            events.append({
+                "row": row_index,
+                "title": title,
+                "status": "skipped",
+                "reason": reason,
+            })
+            skipped.append({"row": row_index, "title": title, "reason": reason})
+            logger.error(
+                "Wishlist row %s skipped (metadata error): %s", row_index, reason
+            )
             continue
 
         game = Game(title=title, status="wishlist", steam_app_id=steam_app_id)
@@ -530,6 +693,22 @@ def import_wishlist_from_csv():
 
         db.session.add(game)
         created_games.append(game)
+        events.append(
+            {
+                "row": row_index,
+                "title": title,
+                "status": "imported",
+                "steam_app_id": steam_app_id,
+                "source": app_id_source,
+            }
+        )
+        logger.info(
+            "Wishlist row %s imported: %s (app_id=%s via %s)",
+            row_index,
+            title,
+            steam_app_id,
+            app_id_source,
+        )
 
     if created_games:
         try:
@@ -542,12 +721,20 @@ def import_wishlist_from_csv():
 
     imported = [game.to_dict() for game in created_games]
 
+    logger.info(
+        "Wishlist CSV import finished: %s imported, %s skipped",
+        len(imported),
+        len(skipped),
+    )
+
     return jsonify(
         {
+            "status": "completed",
             "imported_count": len(imported),
             "skipped_count": len(skipped),
             "imported": imported,
             "skipped": skipped,
+            "events": events,
         }
     )
 

@@ -6,9 +6,9 @@ from sqlalchemy import inspect, text
 db = SQLAlchemy()
 
 
-def create_app():
+def create_app(database_uri: str | None = None):
     app = Flask(__name__)
-    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///data.db"
+    app.config["SQLALCHEMY_DATABASE_URI"] = database_uri or "sqlite:///data.db"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
     db.init_app(app)

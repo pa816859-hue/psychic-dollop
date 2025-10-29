@@ -39,6 +39,36 @@ async function fetchAndCacheGames({ force = false } = {}) {
   return games;
 }
 
+function renderImportLog(container, list, events) {
+  if (!container || !list) return;
+  list.innerHTML = "";
+  if (!Array.isArray(events) || events.length === 0) {
+    container.classList.add("hidden");
+    container.open = false;
+    return;
+  }
+
+  events.forEach((event) => {
+    const item = document.createElement("li");
+    const statusLabel = (event.status || "unknown").toUpperCase();
+    const rowLabel = event.row ? `Row ${event.row}` : null;
+    const titleLabel = event.title || null;
+    const headingParts = [rowLabel, titleLabel].filter(Boolean);
+    const heading = headingParts.length > 0 ? headingParts.join(" · ") : "Row";
+    const detailParts = [];
+    if (event.reason) detailParts.push(event.reason);
+    if (event.source) detailParts.push(`source: ${event.source}`);
+    if (event.steam_app_id) detailParts.push(`app: ${event.steam_app_id}`);
+    item.textContent = `[${statusLabel}] ${heading}${
+      detailParts.length ? ` — ${detailParts.join("; ")}` : ""
+    }`;
+    list.appendChild(item);
+  });
+
+  container.classList.remove("hidden");
+  container.open = true;
+}
+
 async function initBacklogImportPage() {
   const form = document.getElementById("backlog-import-form");
   if (!form) return;
@@ -48,11 +78,18 @@ async function initBacklogImportPage() {
   const summary = document.getElementById("backlog-import-summary");
   const importedList = document.getElementById("backlog-import-imported");
   const skippedList = document.getElementById("backlog-import-skipped");
+  const logContainer = document.getElementById("backlog-import-log");
+  const logList = document.getElementById("backlog-import-log-list");
 
   function resetSummary() {
     if (importedList) importedList.innerHTML = "";
     if (skippedList) skippedList.innerHTML = "";
     summary?.classList.add("hidden");
+    if (logList) logList.innerHTML = "";
+    if (logContainer) {
+      logContainer.classList.add("hidden");
+      logContainer.open = false;
+    }
   }
 
   form.addEventListener("submit", async (event) => {
@@ -111,6 +148,8 @@ async function initBacklogImportPage() {
         summary.classList.remove("hidden");
       }
 
+      renderImportLog(logContainer, logList, payload.events);
+
       form.reset();
       if (fileInput) {
         fileInput.value = "";
@@ -133,11 +172,18 @@ async function initWishlistCsvImportPage() {
   const summary = document.getElementById("wishlist-csv-import-summary");
   const importedList = document.getElementById("wishlist-csv-import-imported");
   const skippedList = document.getElementById("wishlist-csv-import-skipped");
+  const logContainer = document.getElementById("wishlist-csv-import-log");
+  const logList = document.getElementById("wishlist-csv-import-log-list");
 
   function resetSummary() {
     if (importedList) importedList.innerHTML = "";
     if (skippedList) skippedList.innerHTML = "";
     summary?.classList.add("hidden");
+    if (logList) logList.innerHTML = "";
+    if (logContainer) {
+      logContainer.classList.add("hidden");
+      logContainer.open = false;
+    }
   }
 
   form.addEventListener("submit", async (event) => {
@@ -202,6 +248,8 @@ async function initWishlistCsvImportPage() {
       ) {
         summary.classList.remove("hidden");
       }
+
+      renderImportLog(logContainer, logList, payload.events);
 
       form.reset();
       if (fileInput) {
