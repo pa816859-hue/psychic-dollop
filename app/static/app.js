@@ -1,6 +1,21 @@
 const state = {
   cachedGames: [],
+  engagementColorMap: new Map(),
+  engagementPaletteIndex: 0,
 };
+
+const ENGAGEMENT_PALETTE = [
+  "#60a5fa",
+  "#f472b6",
+  "#facc15",
+  "#34d399",
+  "#a855f7",
+  "#f97316",
+  "#38bdf8",
+  "#f87171",
+];
+
+const ENGAGEMENT_OTHER_COLOR = "rgba(148, 163, 184, 0.55)";
 
 const STATUS_TAXONOMY = [
   {
@@ -395,6 +410,359 @@ function formatPlaytimeMinutes(minutes) {
 function formatScorePoints(value) {
   if (!Number.isFinite(value)) return "—";
   return `${Math.round(value)} pts`;
+}
+
+function getEngagementColor(key) {
+  if (!state.engagementColorMap) {
+    state.engagementColorMap = new Map();
+  }
+  const cache = state.engagementColorMap;
+  if (!key) {
+    return ENGAGEMENT_OTHER_COLOR;
+  }
+  const normalized = String(key).toLowerCase();
+  if (!cache.has(normalized)) {
+    const paletteIndex = state.engagementPaletteIndex % ENGAGEMENT_PALETTE.length;
+    cache.set(normalized, ENGAGEMENT_PALETTE[paletteIndex]);
+    state.engagementPaletteIndex += 1;
+  }
+  return cache.get(normalized);
+}
+
+function formatMinutesAxis(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return "0";
+  if (minutes >= 720) {
+    return `${Math.round(minutes / 60)}h`;
+  }
+  if (minutes >= 120) {
+    return `${(minutes / 60).toFixed(1)}h`;
+  }
+  if (minutes >= 60) {
+    return `${(minutes / 60).toFixed(1)}h`;
+  }
+  return `${Math.round(minutes)}m`;
+}
+
+function formatSentimentValue(value) {
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.round(value)} pts`;
+}
+
+function renderEngagementTrend(root, summary) {
+  const chart = root.querySelector('[data-insights-chart="engagement"]');
+  if (!chart) return;
+
+  const canvas = chart.querySelector(".insights-chart__canvas");
+  if (!canvas) return;
+
+  canvas.innerHTML = "";
+  canvas.dataset.state = "loaded";
+
+  const timeline = Array.isArray(summary?.timeline) ? summary.timeline : [];
+  if (timeline.length === 0) {
+    canvas.innerHTML =
+      '<p class="engagement-chart__empty">Log a few play sessions to visualize engagement trends.</p>';
+    return;
+  }
+
+  const minutesValues = timeline.map((entry) => Number(entry.total_minutes) || 0);
+  const maxMinutes = Math.max(...minutesValues);
+  if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) {
+    canvas.innerHTML =
+      '<p class="engagement-chart__empty">Sessions without playtime cannot build a timeline yet.</p>';
+    return;
+  }
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const width = Math.max(360, timeline.length * 110);
+  const height = 280;
+  const padding = { top: 28, right: 36, bottom: 64, left: 68 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
+
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("class", "engagement-chart");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Timeline comparing playtime and sentiment");
+
+  const baseline = document.createElementNS(svgNS, "line");
+  baseline.setAttribute("x1", padding.left);
+  baseline.setAttribute("x2", width - padding.right);
+  baseline.setAttribute("y1", height - padding.bottom);
+  baseline.setAttribute("y2", height - padding.bottom);
+  baseline.setAttribute("stroke", "rgba(148, 163, 184, 0.4)");
+  baseline.setAttribute("stroke-width", 1);
+  svg.appendChild(baseline);
+
+  const tickCount = Math.max(3, Math.min(6, Math.round(maxMinutes / 90)));
+  for (let i = 0; i <= tickCount; i += 1) {
+    const ratio = i / tickCount;
+    const value = maxMinutes * ratio;
+    const y = height - padding.bottom - ratio * chartHeight;
+
+    const gridLine = document.createElementNS(svgNS, "line");
+    gridLine.setAttribute("x1", padding.left);
+    gridLine.setAttribute("x2", width - padding.right);
+    gridLine.setAttribute("y1", y);
+    gridLine.setAttribute("y2", y);
+    gridLine.setAttribute("stroke", "rgba(148, 163, 184, 0.2)");
+    gridLine.setAttribute("stroke-width", i === 0 ? 1.5 : 1);
+    svg.appendChild(gridLine);
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", padding.left - 12);
+    label.setAttribute("y", y + 4);
+    label.setAttribute("text-anchor", "end");
+    label.setAttribute("class", "engagement-chart__axis");
+    label.textContent = formatMinutesAxis(value);
+    svg.appendChild(label);
+  }
+
+  const slotWidth = chartWidth / timeline.length;
+  const barWidth = Math.max(18, Math.min(52, slotWidth * 0.55));
+  const sentimentPoints = [];
+
+  timeline.forEach((entry, index) => {
+    const totalMinutes = Number(entry.total_minutes) || 0;
+    const x = padding.left + index * slotWidth + (slotWidth - barWidth) / 2;
+    let stackedHeight = 0;
+
+    const segments = Array.isArray(entry.top_titles) ? entry.top_titles : [];
+    segments.forEach((segment) => {
+      const minutes = Number(segment.minutes) || 0;
+      if (minutes <= 0) return;
+      const heightRatio = minutes / maxMinutes;
+      const barHeight = heightRatio * chartHeight;
+      const rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", x);
+      rect.setAttribute(
+        "y",
+        height - padding.bottom - stackedHeight - barHeight
+      );
+      rect.setAttribute("width", barWidth);
+      rect.setAttribute("height", barHeight);
+      rect.setAttribute(
+        "fill",
+        segment.title === "Other Titles"
+          ? ENGAGEMENT_OTHER_COLOR
+          : getEngagementColor(segment.game_id || segment.title)
+      );
+      rect.setAttribute("rx", 6);
+      rect.setAttribute("ry", 6);
+
+      const tooltip = document.createElementNS(svgNS, "title");
+      const shareLabel = formatPercent(segment.share || 0, 0);
+      tooltip.textContent = `${segment.title} · ${formatPlaytimeMinutes(minutes)} (${shareLabel})`;
+      rect.appendChild(tooltip);
+
+      svg.appendChild(rect);
+      stackedHeight += barHeight;
+    });
+
+    const center = x + barWidth / 2;
+    const sentiment = Number(entry.average_sentiment);
+    if (Number.isFinite(sentiment)) {
+      const clamped = Math.max(0, Math.min(100, sentiment));
+      const y = height - padding.bottom - (clamped / 100) * chartHeight;
+      sentimentPoints.push({ x: center, y, sentiment, label: entry.label });
+    }
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", center);
+    label.setAttribute("y", height - padding.bottom + 20);
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "engagement-chart__axis engagement-chart__axis--x");
+    label.textContent = entry.label || `Period ${index + 1}`;
+    svg.appendChild(label);
+  });
+
+  if (sentimentPoints.length > 0) {
+    const path = document.createElementNS(svgNS, "path");
+    const pathCommands = sentimentPoints
+      .map((point, idx) => `${idx === 0 ? "M" : "L"}${point.x} ${point.y}`)
+      .join(" ");
+    path.setAttribute("d", pathCommands);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "var(--accent)");
+    path.setAttribute("stroke-width", 2.5);
+    path.setAttribute("stroke-linejoin", "round");
+    path.setAttribute("stroke-linecap", "round");
+    svg.appendChild(path);
+
+    sentimentPoints.forEach((point) => {
+      const dot = document.createElementNS(svgNS, "circle");
+      dot.setAttribute("cx", point.x);
+      dot.setAttribute("cy", point.y);
+      dot.setAttribute("r", 4.5);
+      dot.setAttribute("fill", "var(--accent)");
+
+      const tooltip = document.createElementNS(svgNS, "title");
+      tooltip.textContent = `${point.label}: ${formatSentimentValue(point.sentiment)}`;
+      dot.appendChild(tooltip);
+
+      svg.appendChild(dot);
+    });
+  }
+
+  canvas.appendChild(svg);
+
+  const latest = timeline[timeline.length - 1];
+  if (latest && Array.isArray(latest.top_titles) && latest.top_titles.length > 0) {
+    const legend = document.createElement("ul");
+    legend.className = "engagement-chart__legend";
+    latest.top_titles
+      .filter((entry) => (entry.minutes || 0) > 0)
+      .slice(0, 4)
+      .forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "engagement-chart__legend-item";
+
+        const swatch = document.createElement("span");
+        swatch.className = "engagement-chart__swatch";
+        swatch.style.backgroundColor =
+          entry.title === "Other Titles"
+            ? ENGAGEMENT_OTHER_COLOR
+            : getEngagementColor(entry.game_id || entry.title);
+        item.appendChild(swatch);
+
+        const label = document.createElement("span");
+        const shareLabel = formatPercent(entry.share || 0, 0);
+        label.innerHTML = `<strong>${entry.title}</strong> · ${formatPlaytimeMinutes(
+          entry.minutes
+        )} (${shareLabel})`;
+        item.appendChild(label);
+
+        legend.appendChild(item);
+      });
+
+    canvas.appendChild(legend);
+  }
+}
+
+function calloutHeading(type) {
+  switch (type) {
+    case "spike":
+      return "Momentum spike";
+    case "dip":
+      return "Engagement dip";
+    case "burnout":
+      return "Mood warning";
+    default:
+      return "Insight";
+  }
+}
+
+function renderEngagementCallouts(root, summary) {
+  const container = root.querySelector("[data-insights-callouts]");
+  if (!container) return;
+
+  container.innerHTML = "";
+  container.dataset.state = "loaded";
+
+  const callouts = Array.isArray(summary?.callouts) ? summary.callouts : [];
+  if (callouts.length === 0) {
+    const placeholder = document.createElement("p");
+    placeholder.className = "insights-callouts__empty";
+    placeholder.textContent =
+      container.dataset.placeholderText || "No major spikes or dips detected yet.";
+    container.appendChild(placeholder);
+    return;
+  }
+
+  const timeline = Array.isArray(summary?.timeline) ? summary.timeline : [];
+  callouts.slice(0, 4).forEach((callout) => {
+    const card = document.createElement("article");
+    card.className = `insights-callout insights-callout--${callout.type}`;
+
+    const heading = document.createElement("h3");
+    heading.textContent = calloutHeading(callout.type);
+    card.appendChild(heading);
+
+    const summaryText = document.createElement("p");
+    summaryText.className = "insights-callout__summary";
+    summaryText.textContent = callout.label || "Notable change detected.";
+    card.appendChild(summaryText);
+
+    if (Number.isFinite(callout.percent_change)) {
+      const percent = document.createElement("p");
+      percent.className = "insights-callout__meta";
+      const value = callout.percent_change;
+      const formatted = `${value >= 0 ? "+" : ""}${(value * 100).toFixed(0)}%`;
+      percent.textContent = `Change vs prior period: ${formatted}`;
+      card.appendChild(percent);
+    }
+
+    if (Number.isFinite(callout.change_minutes)) {
+      const delta = document.createElement("p");
+      delta.className = "insights-callout__meta";
+      const direction = callout.change_minutes >= 0 ? "+" : "−";
+      delta.textContent = `Playtime delta: ${direction}${formatPlaytimeMinutes(
+        Math.abs(callout.change_minutes)
+      )}`;
+      card.appendChild(delta);
+    }
+
+    const periodEntry = timeline.find((entry) => entry.period_start === callout.period_start);
+    if (periodEntry) {
+      const snapshot = document.createElement("p");
+      snapshot.className = "insights-callout__snapshot";
+      const sentimentLabel = formatSentimentValue(periodEntry.average_sentiment);
+      snapshot.textContent = `${periodEntry.label}: ${formatPlaytimeMinutes(
+        periodEntry.total_minutes
+      )}, mood ${sentimentLabel}, ${periodEntry.active_titles} active title${
+        periodEntry.active_titles === 1 ? "" : "s"
+      }`;
+      card.appendChild(snapshot);
+    }
+
+    const drivers = callout.drivers || {};
+    if (Array.isArray(drivers.titles) && drivers.titles.length > 0) {
+      const list = document.createElement("ul");
+      list.className = "insights-callout__drivers";
+      drivers.titles.slice(0, 3).forEach((driver) => {
+        const item = document.createElement("li");
+        const swatch = document.createElement("span");
+        swatch.className = "insights-callout__marker";
+        swatch.style.backgroundColor = getEngagementColor(driver.game_id || driver.title);
+        item.appendChild(swatch);
+
+        const label = document.createElement("span");
+        const minutesLabel = formatPlaytimeMinutes(driver.minutes);
+        const shareLabel = formatPercent(driver.share || 0, 0);
+        if (driver.game_id) {
+          const link = document.createElement("a");
+          link.href = `/games/${driver.game_id}`;
+          link.textContent = driver.title;
+          link.className = "insights-callout__link";
+          label.appendChild(link);
+        } else {
+          label.textContent = driver.title || "Untitled";
+        }
+        const detail = document.createElement("span");
+        detail.className = "insights-callout__detail";
+        detail.textContent = ` · ${minutesLabel} (${shareLabel})`;
+        label.appendChild(detail);
+
+        item.appendChild(label);
+        list.appendChild(item);
+      });
+      card.appendChild(list);
+    }
+
+    if (Array.isArray(drivers.genres) && drivers.genres.length > 0) {
+      const genreList = document.createElement("p");
+      genreList.className = "insights-callout__genres";
+      const fragments = drivers.genres.slice(0, 3).map((genre) => {
+        const share = formatPercent(genre.share || 0, 0);
+        return `${genre.genre}: ${share}`;
+      });
+      genreList.textContent = `Leading genres: ${fragments.join(", ")}`;
+      card.appendChild(genreList);
+    }
+
+    container.appendChild(card);
+  });
 }
 
 function describeDominance(dominant) {
@@ -960,11 +1328,13 @@ async function initInsightsPage() {
   root.dataset.state = "loading";
 
   try {
-    const [summary, sentimentSummary, lifecycleSummary] = await Promise.all([
-      fetchJSON("/api/insights/genres"),
-      fetchJSON("/api/insights/genre-sentiment"),
-      fetchJSON("/api/insights/lifecycle"),
-    ]);
+    const [summary, sentimentSummary, lifecycleSummary, engagementSummary] =
+      await Promise.all([
+        fetchJSON("/api/insights/genres"),
+        fetchJSON("/api/insights/genre-sentiment"),
+        fetchJSON("/api/insights/lifecycle"),
+        fetchJSON("/api/insights/engagement-trend"),
+      ]);
 
     const backlogMetric = root.querySelector(
       '[data-insights-metric="backlog"] .insights-card__value'
@@ -986,12 +1356,36 @@ async function initInsightsPage() {
       }`;
     }
 
+    const playtimeMetric = root.querySelector(
+      '[data-insights-metric="playtime"] .insights-card__value'
+    );
+    if (playtimeMetric && engagementSummary?.timeline?.length) {
+      const latest = engagementSummary.timeline[engagementSummary.timeline.length - 1];
+      playtimeMetric.textContent = `${formatPlaytimeMinutes(
+        latest.total_minutes || 0
+      )} · mood ${formatSentimentValue(latest.average_sentiment)}`;
+    }
+
+    renderEngagementTrend(root, engagementSummary);
+    renderEngagementCallouts(root, engagementSummary);
     renderGenreInsights(root, summary);
     renderGenreSentimentComparison(root, sentimentSummary);
     renderLifecycleSummary(root, lifecycleSummary);
     root.dataset.state = "loaded";
   } catch (error) {
     console.error("Failed to load insight data", error);
+    const engagementChart = root.querySelector(
+      '[data-insights-chart="engagement"] .insights-chart__canvas'
+    );
+    if (engagementChart) {
+      engagementChart.innerHTML =
+        '<p class="engagement-chart__error">Unable to load engagement trend right now.</p>';
+    }
+    const calloutContainer = root.querySelector('[data-insights-callouts]');
+    if (calloutContainer) {
+      calloutContainer.innerHTML =
+        '<p class="insights-callouts__error">Unable to load engagement highlights right now.</p>';
+    }
     const genreChart = root.querySelector('[data-insights-chart="genre"] .insights-chart__canvas');
     if (genreChart) {
       genreChart.innerHTML =

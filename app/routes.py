@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from . import db
 from .insights import (
     build_genre_interest_sentiment,
+    summarize_engagement_trend,
     summarize_genre_preferences,
     summarize_lifecycle_metrics,
 )
@@ -153,6 +154,32 @@ def insights_genre_sentiment():
 @bp.route("/api/insights/lifecycle")
 def insights_lifecycle_metrics():
     summary = summarize_lifecycle_metrics()
+    return jsonify(summary)
+
+
+@bp.route("/api/insights/engagement-trend")
+def insights_engagement_trend():
+    period = request.args.get("period", "month")
+    start_param = request.args.get("start") or request.args.get("start_date")
+    end_param = request.args.get("end") or request.args.get("end_date")
+
+    def _parse_date(value: str | None, label: str) -> date | None:
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:  # pragma: no cover - user input validation
+            raise ValueError(f"{label} must be a valid YYYY-MM-DD date") from exc
+
+    try:
+        start_date = _parse_date(start_param, "start")
+        end_date = _parse_date(end_param, "end")
+        summary = summarize_engagement_trend(
+            period=period, start_date=start_date, end_date=end_date
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+
     return jsonify(summary)
 
 
