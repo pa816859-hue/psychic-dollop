@@ -11,7 +11,9 @@ class Game(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255), nullable=False, unique=True)
-    status = db.Column(db.String(32), nullable=False)  # backlog or wishlist
+    status = db.Column(
+        db.String(32), nullable=False
+    )  # backlog, playing, occasional, dropped, story_clear, full_clear, wishlist
     modes_raw = db.Column(db.Text, default="[]")
     genres_raw = db.Column(db.Text, default="[]")
     steam_app_id = db.Column(db.String(32), nullable=True)

@@ -2,6 +2,81 @@ const state = {
   cachedGames: [],
 };
 
+const STATUS_TAXONOMY = [
+  {
+    value: "backlog",
+    label: "Backlog",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No backlog games yet.",
+  },
+  {
+    value: "playing",
+    label: "Playing",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No games are currently marked as playing.",
+  },
+  {
+    value: "occasional",
+    label: "Occasional",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No occasional rotation titles yet.",
+  },
+  {
+    value: "story_clear",
+    label: "Story clear",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No story clears logged yet.",
+  },
+  {
+    value: "full_clear",
+    label: "Full clear",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No full clears recorded yet.",
+  },
+  {
+    value: "dropped",
+    label: "Dropped",
+    requiresPurchaseDate: true,
+    group: "owned",
+    emptyCopy: "No dropped games yet.",
+  },
+  {
+    value: "wishlist",
+    label: "Wishlist",
+    requiresPurchaseDate: false,
+    group: "wishlist",
+    emptyCopy: "No wishlist games yet.",
+  },
+];
+
+const STATUS_LOOKUP = Object.fromEntries(
+  STATUS_TAXONOMY.map((entry) => [entry.value, entry])
+);
+const OWNED_STATUS_SET = new Set(
+  STATUS_TAXONOMY.filter((entry) => entry.requiresPurchaseDate).map(
+    (entry) => entry.value
+  )
+);
+const DEFAULT_STATUS = "backlog";
+
+function getStatusDefinition(value) {
+  return STATUS_LOOKUP[String(value || "").toLowerCase()] || null;
+}
+
+function getStatusLabel(value) {
+  const definition = getStatusDefinition(value);
+  return definition ? definition.label : value || "Unknown";
+}
+
+function statusRequiresPurchase(value) {
+  return OWNED_STATUS_SET.has(String(value || "").toLowerCase());
+}
+
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
@@ -972,7 +1047,7 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
 
   const statusBadge = document.createElement("span");
   statusBadge.className = `game-card-status game-card-status--${game.status}`;
-  statusBadge.textContent = game.status === "backlog" ? "Backlog" : "Wishlist";
+  statusBadge.textContent = getStatusLabel(game.status);
   headerContent.appendChild(statusBadge);
 
   header.appendChild(headerContent);
@@ -1058,10 +1133,7 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
 
   const statusSelect = document.createElement("select");
   statusSelect.name = "status";
-  [
-    { value: "backlog", label: "Backlog" },
-    { value: "wishlist", label: "Wishlist" },
-  ].forEach(({ value, label }) => {
+  STATUS_TAXONOMY.forEach(({ value, label }) => {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = label;
@@ -1080,7 +1152,7 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
   purchaseField.dataset.editPurchase = "";
   const purchaseHint = document.createElement("small");
   purchaseHint.className = "game-edit-hint";
-  purchaseHint.textContent = "Required for backlog entries.";
+  purchaseHint.textContent = "Required once you've purchased the game.";
   purchaseField.appendChild(purchaseHint);
   editFields.appendChild(purchaseField);
 
@@ -1128,10 +1200,10 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
   editForm.appendChild(editButtons);
 
   function updateEditPurchaseRequirement() {
-    const isBacklog = statusSelect.value === "backlog";
-    purchaseInput.required = isBacklog;
-    purchaseField.classList.toggle("is-optional", !isBacklog);
-    if (isBacklog) {
+    const requiresPurchase = statusRequiresPurchase(statusSelect.value);
+    purchaseInput.required = requiresPurchase;
+    purchaseField.classList.toggle("is-optional", !requiresPurchase);
+    if (requiresPurchase) {
       applyDefaultDateIfEmpty(purchaseInput);
     } else {
       purchaseInput.value = "";
@@ -1216,10 +1288,11 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
       return;
     }
 
-    if (payload.status === "wishlist") {
+    if (!statusRequiresPurchase(payload.status)) {
       payload.purchase_date = null;
     } else if (!payload.purchase_date) {
-      editMessage.textContent = "Purchase date is required for backlog entries.";
+      editMessage.textContent =
+        "Purchase date is required once you've purchased the game.";
       purchaseInput.focus();
       return;
     }
@@ -1297,12 +1370,12 @@ async function initAddGamePage() {
 
   function updatePurchaseRequirement() {
     if (!statusSelect || !purchaseInput) return;
-    const isBacklog = statusSelect.value === "backlog";
-    purchaseInput.required = isBacklog;
+    const requiresPurchase = statusRequiresPurchase(statusSelect.value);
+    purchaseInput.required = requiresPurchase;
     if (purchaseGroup) {
-      purchaseGroup.classList.toggle("is-optional", !isBacklog);
+      purchaseGroup.classList.toggle("is-optional", !requiresPurchase);
     }
-    if (isBacklog) {
+    if (requiresPurchase) {
       applyDefaultDateIfEmpty(purchaseInput);
     } else {
       purchaseInput.value = "";
@@ -1474,7 +1547,7 @@ async function initAddGamePage() {
     };
 
     payload.title = String(payload.title || "").trim();
-    payload.status = String(payload.status || "backlog").trim().toLowerCase();
+    payload.status = String(payload.status || DEFAULT_STATUS).trim().toLowerCase();
     payload.steam_app_id = String(payload.steam_app_id || "").trim();
     payload.thoughts = String(payload.thoughts || "").trim();
     payload.purchase_date = String(payload.purchase_date || "").trim();
@@ -1486,8 +1559,8 @@ async function initAddGamePage() {
       return;
     }
 
-    if (payload.status === "backlog" && !payload.purchase_date) {
-      message.textContent = "Purchase date is required for backlog entries.";
+    if (statusRequiresPurchase(payload.status) && !payload.purchase_date) {
+      message.textContent = "Purchase date is required once you've purchased the game.";
       return;
     }
 
@@ -1525,10 +1598,12 @@ async function initAddGamePage() {
       }
       await fetchAndCacheGames({ force: true });
       updatePurchaseRequirement();
-      if (statusSelect.value === "backlog") {
-        applyDefaultDateIfEmpty(purchaseInput);
-      } else if (purchaseInput) {
-        purchaseInput.value = "";
+      if (purchaseInput) {
+        if (statusRequiresPurchase(statusSelect.value)) {
+          applyDefaultDateIfEmpty(purchaseInput);
+        } else {
+          purchaseInput.value = "";
+        }
       }
     } catch (error) {
       message.textContent = error instanceof Error ? error.message : String(error);
@@ -1564,7 +1639,7 @@ async function initGameDetailPage() {
 
   const initialValues = {
     title: titleInput?.value || "",
-    status: statusSelect?.value || "backlog",
+    status: statusSelect?.value || DEFAULT_STATUS,
     purchase: purchaseInput?.value || "",
     start: startInput?.value || "",
     finish: finishInput?.value || "",
@@ -1573,12 +1648,12 @@ async function initGameDetailPage() {
 
   function updatePurchaseRequirement() {
     if (!statusSelect || !purchaseInput) return;
-    const isBacklog = statusSelect.value === "backlog";
-    purchaseInput.required = isBacklog;
+    const requiresPurchase = statusRequiresPurchase(statusSelect.value);
+    purchaseInput.required = requiresPurchase;
     if (purchaseField) {
-      purchaseField.classList.toggle("is-optional", !isBacklog);
+      purchaseField.classList.toggle("is-optional", !requiresPurchase);
     }
-    if (!isBacklog) {
+    if (!requiresPurchase) {
       purchaseInput.value = "";
     } else if (!purchaseInput.value) {
       applyDefaultDateIfEmpty(purchaseInput);
@@ -1664,11 +1739,12 @@ async function initGameDetailPage() {
         return;
       }
 
-      if (payload.status === "wishlist") {
+      if (!statusRequiresPurchase(payload.status)) {
         payload.purchase_date = null;
       } else if (!payload.purchase_date) {
         if (editMessage) {
-          editMessage.textContent = "Purchase date is required for backlog entries.";
+          editMessage.textContent =
+            "Purchase date is required once you've purchased the game.";
         }
         purchaseInput?.focus();
         return;
@@ -1766,55 +1842,54 @@ async function initGameDetailPage() {
 }
 
 async function initLibraryPage() {
-  const backlogList = document.getElementById("backlog-list");
-  const wishlistList = document.getElementById("wishlist-list");
-  if (!backlogList && !wishlistList) return;
+  const libraryLists = new Map();
+  document.querySelectorAll("[data-library-list]").forEach((element) => {
+    const status = element.dataset.libraryList;
+    if (status) {
+      libraryLists.set(status, element);
+    }
+  });
+
+  if (libraryLists.size === 0) {
+    return;
+  }
 
   async function renderLists() {
     const games = await fetchAndCacheGames({ force: true });
     const byEloDesc = (a, b) =>
       (Number(b.elo_rating) || 0) - (Number(a.elo_rating) || 0);
 
-    if (backlogList) {
-      backlogList.innerHTML = "";
-      const backlogGames = games
-        .filter((game) => game.status === "backlog")
-        .sort(byEloDesc);
-      backlogGames.forEach((game) => {
+    const grouped = Object.create(null);
+    games.forEach((game) => {
+      const normalizedStatus = getStatusDefinition(game.status)?.value || DEFAULT_STATUS;
+      if (!grouped[normalizedStatus]) {
+        grouped[normalizedStatus] = [];
+      }
+      grouped[normalizedStatus].push(game);
+    });
+
+    STATUS_TAXONOMY.forEach((definition) => {
+      const listElement = libraryLists.get(definition.value);
+      if (!listElement) return;
+
+      listElement.innerHTML = "";
+      const entries = (grouped[definition.value] || []).sort(byEloDesc);
+      if (entries.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty-state";
+        empty.textContent = definition.emptyCopy;
+        listElement.appendChild(empty);
+        return;
+      }
+
+      entries.forEach((game) => {
         const card = createGameCard(game, {
           onDelete: renderLists,
           onUpdate: renderLists,
         });
-        backlogList.appendChild(card);
+        listElement.appendChild(card);
       });
-    }
-
-    if (wishlistList) {
-      wishlistList.innerHTML = "";
-      const wishlistGames = games
-        .filter((game) => game.status === "wishlist")
-        .sort(byEloDesc);
-      wishlistGames.forEach((game) => {
-        const card = createGameCard(game, {
-          onDelete: renderLists,
-          onUpdate: renderLists,
-        });
-        wishlistList.appendChild(card);
-      });
-    }
-
-    if (backlogList && backlogList.children.length === 0) {
-      const item = document.createElement("li");
-      item.className = "empty-state";
-      item.textContent = "No backlog games yet.";
-      backlogList.appendChild(item);
-    }
-    if (wishlistList && wishlistList.children.length === 0) {
-      const item = document.createElement("li");
-      item.className = "empty-state";
-      item.textContent = "No wishlist games yet.";
-      wishlistList.appendChild(item);
-    }
+    });
   }
 
   await renderLists();
@@ -1826,6 +1901,17 @@ async function initRankingsPage() {
   const rankingList = document.getElementById("ranking-list");
   const rankingTitle = document.getElementById("ranking-table-title");
   if (!statusSelect || !pairContainer || !rankingList) return;
+
+  statusSelect.innerHTML = "";
+  STATUS_TAXONOMY.forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    statusSelect.appendChild(option);
+  });
+  if (!STATUS_LOOKUP[statusSelect.value]) {
+    statusSelect.value = DEFAULT_STATUS;
+  }
 
   const state = {
     loadingPair: false,
@@ -1990,8 +2076,8 @@ async function initRankingsPage() {
         rankingList.appendChild(item);
       }
       if (rankingTitle) {
-        rankingTitle.textContent =
-          status === "backlog" ? "Backlog ranking" : "Wishlist ranking";
+        const label = getStatusLabel(status);
+        rankingTitle.textContent = `${label} ranking`;
       }
     } catch (error) {
       rankingList.innerHTML = "";
@@ -2176,7 +2262,12 @@ async function initSettingsPage() {
     }
   });
 
-  async function handleSteamImport(form, url, resultElement) {
+  async function handleSteamImport(
+    form,
+    url,
+    resultElement,
+    { defaultStatus = DEFAULT_STATUS } = {}
+  ) {
     const formData = new FormData(form);
     const payload = Object.fromEntries(formData.entries());
     payload.steam_id = String(payload.steam_id || "").trim();
@@ -2185,7 +2276,7 @@ async function initSettingsPage() {
       return;
     }
     if (payload.status !== undefined) {
-      payload.status = String(payload.status || "").trim();
+      payload.status = String(payload.status || defaultStatus).trim().toLowerCase();
     }
     if (payload.api_key !== undefined) {
       payload.api_key = String(payload.api_key || "").trim();
@@ -2221,7 +2312,8 @@ async function initSettingsPage() {
     await handleSteamImport(
       libraryImportForm,
       "/api/steam/import/library",
-      libraryImportResult
+      libraryImportResult,
+      { defaultStatus: DEFAULT_STATUS }
     );
   });
 
@@ -2231,7 +2323,8 @@ async function initSettingsPage() {
     await handleSteamImport(
       wishlistImportForm,
       "/api/steam/import/wishlist",
-      wishlistImportResult
+      wishlistImportResult,
+      { defaultStatus: "wishlist" }
     );
   });
 }

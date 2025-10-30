@@ -6,17 +6,44 @@
   <section class="panel" id="lists">
     <div class="panel-heading">
       <h2>Your library</h2>
-      <p>Browse and manage everything in your backlog and wishlist.</p>
+      <p>Browse and manage every stage of your library, from wishlist to full clears.</p>
     </div>
-    <div class="columns">
-      <div>
+    <div class="library-sections">
+      <section class="library-section" data-library-status="backlog">
         <h3>Backlog</h3>
-        <ul id="backlog-list" class="game-list"></ul>
-      </div>
-      <div>
+        <p class="hint">Owned titles waiting for their first session.</p>
+        <ul class="game-list" data-library-list="backlog"></ul>
+      </section>
+      <section class="library-section" data-library-status="playing">
+        <h3>Playing</h3>
+        <p class="hint">Games currently in your regular rotation.</p>
+        <ul class="game-list" data-library-list="playing"></ul>
+      </section>
+      <section class="library-section" data-library-status="occasional">
+        <h3>Occasional</h3>
+        <p class="hint">Titles you dip into when the mood strikes.</p>
+        <ul class="game-list" data-library-list="occasional"></ul>
+      </section>
+      <section class="library-section" data-library-status="story_clear">
+        <h3>Story clear</h3>
+        <p class="hint">Main story complete—side quests optional.</p>
+        <ul class="game-list" data-library-list="story_clear"></ul>
+      </section>
+      <section class="library-section" data-library-status="full_clear">
+        <h3>Full clear</h3>
+        <p class="hint">100% or personal definition of done.</p>
+        <ul class="game-list" data-library-list="full_clear"></ul>
+      </section>
+      <section class="library-section" data-library-status="dropped">
+        <h3>Dropped</h3>
+        <p class="hint">Paused indefinitely or no longer a focus.</p>
+        <ul class="game-list" data-library-list="dropped"></ul>
+      </section>
+      <section class="library-section" data-library-status="wishlist">
         <h3>Wishlist</h3>
-        <ul id="wishlist-list" class="game-list"></ul>
-      </div>
+        <p class="hint">Games you're considering picking up.</p>
+        <ul class="game-list" data-library-list="wishlist"></ul>
+      </section>
     </div>
   </section>
 {% endblock %}

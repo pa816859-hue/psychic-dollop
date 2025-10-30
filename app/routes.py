@@ -25,6 +25,14 @@ from .insights import (
 )
 from .models import Comparison, Game, SessionLog
 from .metrics import compute_weighted_sentiment
+from .statuses import (
+    DEFAULT_STATUS,
+    OWNED_STATUSES,
+    STATUS_VALUES,
+    normalize_status_value,
+    requires_purchase_date,
+    validate_status,
+)
 
 bp = Blueprint("core", __name__)
 
@@ -158,11 +166,17 @@ def wishlist_import_page():
     return render_template("import_wishlist.html", page_id="import-wishlist")
 
 
-def _parse_date_field(value: str | None, label: str, required: bool = False) -> date | None:
+def _parse_date_field(
+    value: str | None,
+    label: str,
+    required: bool = False,
+    required_message: str | None = None,
+) -> date | None:
     value = (value or "").strip()
     if not value:
         if required:
-            raise ValueError(f"{label} is required.")
+            message = required_message or f"{label} is required."
+            raise ValueError(message)
         return None
 
     try:
@@ -173,11 +187,30 @@ def _parse_date_field(value: str | None, label: str, required: bool = False) -> 
         ) from exc
 
 
-def _validate_status(status: str) -> str:
-    allowed = {"backlog", "wishlist"}
-    if status not in allowed:
-        raise ValueError(f"Status must be one of {', '.join(sorted(allowed))}.")
-    return status
+def _validate_status(status: str | None) -> str:
+    return validate_status(status)
+
+
+def normalize_existing_game_statuses() -> int:
+    """Normalize stored game statuses to supported values.
+
+    Returns the number of rows that were updated during normalization.
+    """
+
+    allowed = set(STATUS_VALUES)
+    updated = 0
+    for game in Game.query.all():
+        normalized = normalize_status_value(game.status)
+        if normalized not in allowed:
+            normalized = DEFAULT_STATUS
+        if game.status != normalized:
+            game.status = normalized
+            updated += 1
+
+    if updated:
+        db.session.commit()
+
+    return updated
 
 
 def _clean_description(value: str | None) -> str | None:
@@ -314,7 +347,7 @@ def games_collection():
     if request.method == "POST":
         payload = request.get_json(force=True)
         title = (payload.get("title") or "").strip()
-        status = (payload.get("status") or "").strip().lower()
+        status = normalize_status_value(payload.get("status"))
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
         modes = payload.get("modes") or []
         thoughts = (payload.get("thoughts") or "").strip() or None
@@ -338,7 +371,10 @@ def games_collection():
 
         try:
             purchase_date = _parse_date_field(
-                payload.get("purchase_date"), "Purchase date", required=status == "backlog"
+                payload.get("purchase_date"),
+                "Purchase date",
+                required=requires_purchase_date(status),
+                required_message="Purchase date is required once you've purchased the game.",
             )
             start_date = _parse_date_field(payload.get("start_date"), "Start date")
             finish_date = _parse_date_field(payload.get("finish_date"), "Finish date")
@@ -771,7 +807,7 @@ def games_resource(game_id: int):
 
     payload = request.get_json(force=True)
     title = (payload.get("title") or game.title).strip()
-    status = (payload.get("status") or game.status).strip().lower()
+    status = normalize_status_value(payload.get("status") or game.status)
     if "steam_app_id" in payload:
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
     else:
@@ -795,12 +831,15 @@ def games_resource(game_id: int):
             purchase_date = _parse_date_field(
                 payload.get("purchase_date"),
                 "Purchase date",
-                required=status == "backlog",
+                required=requires_purchase_date(status),
+                required_message="Purchase date is required once you've purchased the game.",
             )
         else:
             purchase_date = game.purchase_date
-            if status == "backlog" and purchase_date is None:
-                raise ValueError("Purchase date is required.")
+            if requires_purchase_date(status) and purchase_date is None:
+                raise ValueError(
+                    "Purchase date is required once you've purchased the game."
+                )
 
         if "start_date" in payload:
             start_date = _parse_date_field(payload.get("start_date"), "Start date")
@@ -1120,7 +1159,7 @@ def _import_games(entries: list[dict], status: str) -> tuple[list[Game], int]:
             game.genres = []
             game.icon_url = None
             game.short_description = None
-        if status == "backlog" and game.purchase_date is None:
+        if requires_purchase_date(status) and game.purchase_date is None:
             game.purchase_date = datetime.utcnow().date()
         db.session.add(game)
         imported.append(game)
@@ -1136,7 +1175,7 @@ def import_steam_library():
     payload = request.get_json(force=True)
     steam_id_input = (payload.get("steam_id") or "").strip()
     api_key = (payload.get("api_key") or "").strip()
-    status = (payload.get("status") or "backlog").strip().lower()
+    status = normalize_status_value(payload.get("status"))
 
     try:
         normalized_status = _validate_status(status)
@@ -1237,7 +1276,7 @@ def import_steam_wishlist():
     payload = request.get_json(force=True)
     steam_id_input = (payload.get("steam_id") or "").strip()
     api_key = (payload.get("api_key") or "").strip() or None
-    status = (payload.get("status") or "wishlist").strip().lower()
+    status = normalize_status_value(payload.get("status") or "wishlist")
 
     try:
         normalized_status = _validate_status(status)

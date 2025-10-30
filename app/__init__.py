@@ -13,13 +13,14 @@ def create_app(database_uri: str | None = None):
 
     db.init_app(app)
 
-    from .routes import bp as core_bp
+    from .routes import bp as core_bp, normalize_existing_game_statuses
 
     app.register_blueprint(core_bp)
 
     with app.app_context():
         db.create_all()
         _ensure_game_columns()
+        normalize_existing_game_statuses()
 
     return app
 
