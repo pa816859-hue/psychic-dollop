@@ -18,6 +18,7 @@ from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
+from .insights import summarize_genre_preferences
 from .models import Comparison, Game, SessionLog
 
 bp = Blueprint("core", __name__)
@@ -84,6 +85,12 @@ def sessions_page():
 @bp.route("/insights")
 def insights_page():
     return render_template("insights.html", page_id="insights")
+
+
+@bp.route("/api/insights/genres")
+def insights_genre_summary():
+    summary = summarize_genre_preferences()
+    return jsonify(summary)
 
 
 @bp.route("/games/<int:game_id>")
