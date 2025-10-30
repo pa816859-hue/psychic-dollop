@@ -99,6 +99,11 @@ body.steam-surface {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
+.insights-chart[data-insights-chart="genre"],
+.insights-chart[data-insights-chart="genre-sentiment"] {
+  grid-column: 1 / -1;
+}
+
 .insights-chart {
   background: var(--bg-panel);
   border: 1px solid rgba(26, 59, 92, 0.6);
