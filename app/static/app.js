@@ -264,6 +264,218 @@ async function initWishlistCsvImportPage() {
   });
 }
 
+function formatPercent(value, fractionDigits = 1) {
+  if (!Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat(undefined, {
+    style: "percent",
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+}
+
+function formatAverageElo(value) {
+  if (!Number.isFinite(value)) return "Avg ELO —";
+  return `Avg ELO ${Math.round(value)}`;
+}
+
+function describeDominance(dominant) {
+  switch (dominant) {
+    case "backlog":
+      return "Backlog leaning";
+    case "wishlist":
+      return "Wishlist leaning";
+    default:
+      return "Balanced mix";
+  }
+}
+
+function renderGenreInsights(root, summary) {
+  const genreChart = root.querySelector('[data-insights-chart="genre"]');
+  if (!genreChart) return;
+
+  const canvas = genreChart.querySelector(".insights-chart__canvas");
+  if (!canvas) return;
+
+  canvas.innerHTML = "";
+  canvas.dataset.state = "loaded";
+
+  if (!summary || !Array.isArray(summary.genres) || summary.genres.length === 0) {
+    canvas.innerHTML =
+      '<p class="genre-insights__empty">No genre insights are available yet. Add more games with genres to see trends.</p>';
+    return;
+  }
+
+  const metrics = [
+    {
+      key: "share",
+      label: "Weighted share",
+      extractor: (entry) => entry?.total?.share ?? 0,
+      formatter: (value) => `${formatPercent(value)} share`,
+    },
+    {
+      key: "count",
+      label: "Game count",
+      extractor: (entry) => entry?.total?.count ?? 0,
+      formatter: (value) => {
+        const rounded = Math.round(value);
+        const suffix = rounded === 1 ? " game" : " games";
+        return `${rounded.toLocaleString()}${suffix}`;
+      },
+    },
+    {
+      key: "average_elo",
+      label: "Avg ELO",
+      extractor: (entry) => entry?.total?.average_elo ?? null,
+      formatter: (value) =>
+        Number.isFinite(value) ? `${Math.round(value)} ELO` : "No rating data",
+    },
+  ];
+
+  let activeMetric = metrics[0];
+
+  const controls = document.createElement("div");
+  controls.className = "genre-insights__controls";
+
+  metrics.forEach((metric) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "genre-insights__toggle";
+    button.dataset.metric = metric.key;
+    button.textContent = metric.label;
+    if (metric.key === activeMetric.key) {
+      button.classList.add("is-active");
+    }
+    button.addEventListener("click", () => {
+      if (activeMetric.key === metric.key) return;
+      activeMetric = metric;
+      controls.querySelectorAll(".is-active").forEach((element) => {
+        element.classList.remove("is-active");
+      });
+      button.classList.add("is-active");
+      updateLists();
+    });
+    controls.appendChild(button);
+  });
+
+  const listsWrapper = document.createElement("div");
+  listsWrapper.className = "genre-insights__lists";
+
+  const topColumn = document.createElement("section");
+  topColumn.className = "genre-insights__column";
+  const topHeading = document.createElement("h3");
+  topHeading.textContent = "Top genres";
+  const topList = document.createElement("ul");
+  topList.className = "genre-insights__items";
+  topColumn.appendChild(topHeading);
+  topColumn.appendChild(topList);
+
+  const bottomColumn = document.createElement("section");
+  bottomColumn.className = "genre-insights__column";
+  const bottomHeading = document.createElement("h3");
+  bottomHeading.textContent = "Genres to diversify";
+  const bottomList = document.createElement("ul");
+  bottomList.className = "genre-insights__items";
+  bottomColumn.appendChild(bottomHeading);
+  bottomColumn.appendChild(bottomList);
+
+  listsWrapper.appendChild(topColumn);
+  listsWrapper.appendChild(bottomColumn);
+
+  canvas.appendChild(controls);
+  canvas.appendChild(listsWrapper);
+
+  function renderList(target, entries, metric, isBottom = false) {
+    target.innerHTML = "";
+    entries.forEach(({ entry, value }) => {
+      const item = document.createElement("li");
+      item.className = "genre-insights__item";
+
+      const header = document.createElement("div");
+      header.className = "genre-insights__item-header";
+
+      const name = document.createElement("span");
+      name.className = "genre-insights__item-name";
+      name.textContent = entry.genre;
+
+      const metricValue = document.createElement("span");
+      metricValue.className = "genre-insights__item-value";
+      if (isBottom) {
+        metricValue.classList.add("genre-insights__item-value--low");
+      }
+      metricValue.textContent = metric.formatter(value, entry);
+
+      header.appendChild(name);
+      header.appendChild(metricValue);
+      item.appendChild(header);
+
+      const breakdown = document.createElement("div");
+      breakdown.className = "genre-insights__item-breakdown";
+      breakdown.innerHTML = buildGenreBreakdown(entry);
+      item.appendChild(breakdown);
+
+      const dominance = document.createElement("p");
+      dominance.className = `genre-insights__item-dominance genre-insights__item-dominance--${entry.dominant}`;
+      dominance.textContent = describeDominance(entry.dominant);
+      item.appendChild(dominance);
+
+      target.appendChild(item);
+    });
+  }
+
+  function buildGenreBreakdown(entry) {
+    const totalWeight = entry?.total?.weight ?? 0;
+    const backlogWeight = entry?.backlog?.weight ?? 0;
+    const wishlistWeight = entry?.wishlist?.weight ?? 0;
+
+    const backlogShare = totalWeight ? backlogWeight / totalWeight : 0;
+    const wishlistShare = totalWeight ? wishlistWeight / totalWeight : 0;
+
+    const backlogLabel = backlogWeight
+      ? `${formatPercent(backlogShare)} backlog • ${formatAverageElo(entry.backlog.average_elo)}`
+      : "No backlog data";
+    const wishlistLabel = wishlistWeight
+      ? `${formatPercent(wishlistShare)} wishlist • ${formatAverageElo(entry.wishlist.average_elo)}`
+      : "No wishlist data";
+
+    return `<span>${backlogLabel}</span><span>${wishlistLabel}</span>`;
+  }
+
+  function updateLists() {
+    const decorated = summary.genres.map((entry) => ({
+      entry,
+      value: activeMetric.extractor(entry),
+    }));
+
+    const filtered = decorated.filter(({ entry, value }) => {
+      if (activeMetric.key === "average_elo") {
+        return Number.isFinite(value);
+      }
+      return Number.isFinite(value) && value > 0 && entry.total?.weight > 0;
+    });
+
+    if (filtered.length === 0) {
+      topList.innerHTML =
+        '<li class="genre-insights__empty">Not enough data to rank genres yet.</li>';
+      bottomList.innerHTML = "";
+      return;
+    }
+
+    filtered.sort((a, b) => {
+      const aValue = Number.isFinite(a.value) ? a.value : -Infinity;
+      const bValue = Number.isFinite(b.value) ? b.value : -Infinity;
+      return bValue - aValue;
+    });
+
+    const topItems = filtered.slice(0, 5);
+    const bottomItems = filtered.slice(-5).reverse();
+
+    renderList(topList, topItems, activeMetric);
+    renderList(bottomList, bottomItems, activeMetric, true);
+  }
+
+  updateLists();
+}
+
 async function initInsightsPage() {
   const root = document.querySelector("[data-insights-root]");
   if (!root) return;
@@ -275,8 +487,42 @@ async function initInsightsPage() {
     }
   });
 
-  root.dataset.state = "initialized";
-  // Future insights data fetching and rendering will be handled here.
+  root.dataset.state = "loading";
+
+  try {
+    const summary = await fetchJSON("/api/insights/genres");
+
+    const backlogMetric = root.querySelector(
+      '[data-insights-metric="backlog"] .insights-card__value'
+    );
+    if (backlogMetric && summary?.backlog) {
+      const totalGames = summary.backlog.total_games ?? 0;
+      backlogMetric.textContent = `${totalGames.toLocaleString()} game${
+        totalGames === 1 ? "" : "s"
+      }`;
+    }
+
+    const wishlistMetric = root.querySelector(
+      '[data-insights-metric="wishlist"] .insights-card__value'
+    );
+    if (wishlistMetric && summary?.wishlist) {
+      const totalGames = summary.wishlist.total_games ?? 0;
+      wishlistMetric.textContent = `${totalGames.toLocaleString()} title${
+        totalGames === 1 ? "" : "s"
+      }`;
+    }
+
+    renderGenreInsights(root, summary);
+    root.dataset.state = "loaded";
+  } catch (error) {
+    console.error("Failed to load insight data", error);
+    const genreChart = root.querySelector('[data-insights-chart="genre"] .insights-chart__canvas');
+    if (genreChart) {
+      genreChart.innerHTML =
+        '<p class="genre-insights__error">Unable to load genre insights right now. Please try again later.</p>';
+    }
+    root.dataset.state = "error";
+  }
 }
 
 function createGameCard(game, { onDelete, onUpdate } = {}) {
