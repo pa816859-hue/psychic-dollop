@@ -96,5 +96,26 @@
         <p class="hint" id="wishlist-import-result"></p>
       </div>
     </div>
+    <div class="danger-zone">
+      <h3>Danger zone</h3>
+      <p>
+        Delete every game, play session, and ranking comparison stored in Deck Commander.
+        This action cannot be undone.
+      </p>
+      <form id="purge-data-form">
+        <div class="field">
+          <label for="purge-confirm">Type DELETE to confirm</label>
+          <input
+            id="purge-confirm"
+            name="confirm"
+            type="text"
+            placeholder="DELETE"
+            required
+          />
+        </div>
+        <button type="submit" class="danger">Delete all data</button>
+      </form>
+      <p class="hint" id="purge-data-result"></p>
+    </div>
   </section>
 {% endblock %}

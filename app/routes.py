@@ -139,6 +139,42 @@ def settings_page():
     return render_template("settings.html", page_id="settings")
 
 
+@bp.route("/api/settings/purge-data", methods=["POST"])
+def purge_all_data():
+    payload = request.get_json(silent=True) or {}
+    confirmation_value = str(payload.get("confirm", "")).strip()
+
+    if confirmation_value.lower() != "delete":
+        return (
+            jsonify({"error": "Type DELETE in the confirmation field to purge data."}),
+            400,
+        )
+
+    try:
+        comparisons_deleted = Comparison.query.delete(synchronize_session=False)
+        sessions_deleted = SessionLog.query.delete(synchronize_session=False)
+        games_deleted = Game.query.delete(synchronize_session=False)
+        db.session.commit()
+    except SQLAlchemyError as error:
+        db.session.rollback()
+        logger.exception("Failed to purge database", exc_info=error)
+        return jsonify({"error": "Failed to purge database."}), 500
+
+    total_deleted = (comparisons_deleted or 0) + (sessions_deleted or 0) + (
+        games_deleted or 0
+    )
+    return jsonify(
+        {
+            "deleted": {
+                "comparisons": comparisons_deleted or 0,
+                "sessions": sessions_deleted or 0,
+                "games": games_deleted or 0,
+            },
+            "total_deleted": total_deleted,
+        }
+    )
+
+
 @bp.route("/api/insights/genres")
 def insights_genre_summary():
     summary = summarize_genre_preferences()

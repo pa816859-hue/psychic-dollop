@@ -892,6 +892,16 @@ button.primary {
   box-shadow: 0 16px 32px rgba(26, 159, 255, 0.35);
 }
 
+button.danger {
+  background: linear-gradient(120deg, rgba(255, 59, 92, 0.95), rgba(255, 122, 146, 0.95));
+  color: #2b0208;
+  box-shadow: 0 16px 32px rgba(255, 59, 92, 0.35);
+}
+
+button.danger:hover {
+  box-shadow: 0 22px 40px rgba(255, 59, 92, 0.45);
+}
+
 .hero-cta .primary:hover,
 button.primary:hover,
 button:hover {
@@ -915,6 +925,28 @@ button {
   color: #051426;
   border: none;
   box-shadow: 0 12px 25px rgba(14, 92, 167, 0.4);
+}
+
+.danger-zone {
+  border-top: 1px solid rgba(26, 59, 92, 0.35);
+  margin-top: 2rem;
+  padding-top: 1.75rem;
+}
+
+.danger-zone h3 {
+  color: var(--danger);
+  letter-spacing: 0.08em;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.danger-zone p {
+  margin-top: 0;
+  color: var(--text-muted);
+}
+
+.danger-zone .field label {
+  color: var(--danger);
 }
 
 button:focus-visible {

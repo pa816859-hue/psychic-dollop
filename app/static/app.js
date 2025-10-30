@@ -2992,6 +2992,9 @@ async function initSettingsPage() {
   const wishlistImportForm = document.getElementById("wishlist-import-form");
   const libraryImportResult = document.getElementById("library-import-result");
   const wishlistImportResult = document.getElementById("wishlist-import-result");
+  const purgeDataForm = document.getElementById("purge-data-form");
+  const purgeDataResult = document.getElementById("purge-data-result");
+  const purgeConfirmInput = document.getElementById("purge-confirm");
 
   steamForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -3075,6 +3078,59 @@ async function initSettingsPage() {
       wishlistImportResult,
       { defaultStatus: "wishlist" }
     );
+  });
+
+  purgeDataForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!purgeDataResult) return;
+
+    const confirmValue = purgeConfirmInput?.value.trim() || "";
+    if (confirmValue.toLowerCase() !== "delete") {
+      purgeDataResult.textContent = "Type DELETE in the confirmation box.";
+      return;
+    }
+
+    const submitButton = purgeDataForm.querySelector("button[type='submit']");
+    purgeDataResult.textContent = "Deleting...";
+    submitButton?.setAttribute("disabled", "disabled");
+
+    try {
+      const data = await fetchJSON("/api/settings/purge-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: confirmValue }),
+      });
+      const { deleted } = data;
+      const parts = [];
+      if (deleted) {
+        if (typeof deleted.games === "number") {
+          parts.push(`${deleted.games} game${deleted.games === 1 ? "" : "s"}`);
+        }
+        if (typeof deleted.sessions === "number") {
+          parts.push(
+            `${deleted.sessions} session${deleted.sessions === 1 ? "" : "s"}`
+          );
+        }
+        if (typeof deleted.comparisons === "number") {
+          parts.push(
+            `${deleted.comparisons} comparison${
+              deleted.comparisons === 1 ? "" : "s"
+            }`
+          );
+        }
+      }
+      const summary = parts.length > 0 ? parts.join(", ") : "no records";
+      purgeDataResult.textContent = `Deleted ${summary} from the database.`;
+      if (purgeConfirmInput) {
+        purgeConfirmInput.value = "";
+      }
+      state.cachedGames = [];
+      await fetchAndCacheGames({ force: true });
+    } catch (error) {
+      purgeDataResult.textContent = error instanceof Error ? error.message : String(error);
+    } finally {
+      submitButton?.removeAttribute("disabled");
+    }
   });
 }
 
