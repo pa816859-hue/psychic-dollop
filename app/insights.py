@@ -14,18 +14,48 @@ from sqlalchemy import or_
 from . import db
 from .metrics import compute_weighted_sentiment
 from .models import Game, SessionLog
-from .statuses import INSIGHT_BUCKET_BY_STATUS
+from .statuses import (
+    INSIGHT_BUCKET_BY_STATUS,
+    INSIGHT_BUCKET_DISPLAY_ORDER,
+    INSIGHT_BUCKET_METADATA,
+)
 
 
-_BUCKET_DISPLAY_ORDER = ("backlog", "wishlist")
+_DEFAULT_BUCKET_DISPLAY_ORDER = tuple(INSIGHT_BUCKET_DISPLAY_ORDER)
+if not _DEFAULT_BUCKET_DISPLAY_ORDER:
+    _DEFAULT_BUCKET_DISPLAY_ORDER = tuple(INSIGHT_BUCKET_BY_STATUS.values())
+
 _INSIGHT_BUCKET_SET = set(INSIGHT_BUCKET_BY_STATUS.values())
 _INSIGHT_BUCKETS = tuple(
-    bucket for bucket in _BUCKET_DISPLAY_ORDER if bucket in _INSIGHT_BUCKET_SET
+    bucket for bucket in _DEFAULT_BUCKET_DISPLAY_ORDER if bucket in _INSIGHT_BUCKET_SET
 )
 if len(_INSIGHT_BUCKETS) < len(_INSIGHT_BUCKET_SET):
     _INSIGHT_BUCKETS = _INSIGHT_BUCKETS + tuple(
         sorted(_INSIGHT_BUCKET_SET - set(_INSIGHT_BUCKETS))
     )
+
+
+def _humanize_bucket(bucket: str) -> str:
+    parts = bucket.replace("-", " ").replace("_", " ").split()
+    if not parts:
+        return bucket.title()
+    return " ".join(part.capitalize() for part in parts)
+
+
+def _resolve_bucket_metadata(bucket: str) -> dict[str, str]:
+    metadata = INSIGHT_BUCKET_METADATA.get(bucket, {})
+    label = metadata.get("label") or _humanize_bucket(bucket)
+    description = metadata.get("description", "")
+    color = metadata.get("color")
+    payload: dict[str, str] = {"label": label, "description": description}
+    if color:
+        payload["color"] = color
+    return payload
+
+
+_BUCKET_METADATA = {
+    bucket: _resolve_bucket_metadata(bucket) for bucket in _INSIGHT_BUCKETS
+}
 
 
 def _normalize_genres(genres: Iterable[str] | None) -> list[str]:
@@ -42,12 +72,12 @@ def _normalize_genres(genres: Iterable[str] | None) -> list[str]:
 
 
 def summarize_genre_preferences() -> Dict[str, Any]:
-    """Aggregate genre preferences split by backlog and wishlist.
+    """Aggregate genre preferences for every insights bucket.
 
     The aggregation distributes each game's weight evenly across its genres so
     multi-genre titles do not dominate the totals. For every genre we return the
-    raw counts, weight share, and weighted average ELO for backlog and wishlist
-    lists separately along with a combined rollup.
+    raw counts, weight share, and weighted average ELO for each status bucket as
+    well as a combined roll-up across all tracked lists.
     """
 
     def _metric_factory() -> dict[str, float]:
@@ -125,35 +155,37 @@ def summarize_genre_preferences() -> Dict[str, Any]:
         }
 
     for genre in sorted(all_genres):
-        backlog_entry = _format_entry(
-            "backlog",
-            genre,
-            bucket_genre_totals.get("backlog", defaultdict(_metric_factory)),
-        )
-        wishlist_entry = _format_entry(
-            "wishlist",
-            genre,
-            bucket_genre_totals.get("wishlist", defaultdict(_metric_factory)),
+        bucket_entries: dict[str, dict[str, Any]] = {}
+        total_weight = 0.0
+        total_count = 0
+        total_elo_sum = 0.0
+
+        for bucket in _INSIGHT_BUCKETS:
+            bucket_totals = bucket_genre_totals.get(bucket, defaultdict(_metric_factory))
+            entry_metrics = _format_entry(bucket, genre, bucket_totals)
+            bucket_entries[bucket] = entry_metrics
+            total_weight += entry_metrics["weight"]
+            total_count += entry_metrics["count"]
+            total_elo_sum += entry_metrics["elo_sum"]
+
+        total_average_elo = total_elo_sum / total_weight if total_weight else None
+
+        dominant_bucket, dominant_share = _determine_dominant_bucket(
+            {bucket: metrics["weight"] for bucket, metrics in bucket_entries.items()},
+            total_weight,
         )
 
-        total_weight = backlog_entry["weight"] + wishlist_entry["weight"]
-        total_count = backlog_entry["count"] + wishlist_entry["count"]
-        total_elo_sum = backlog_entry["elo_sum"] + wishlist_entry["elo_sum"]
-        total_average_elo = total_elo_sum / total_weight if total_weight else None
         combined_genres.append(
             {
                 "genre": genre,
-                "backlog": {
-                    "count": backlog_entry["count"],
-                    "weight": backlog_entry["weight"],
-                    "share": backlog_entry["share"],
-                    "average_elo": backlog_entry["average_elo"],
-                },
-                "wishlist": {
-                    "count": wishlist_entry["count"],
-                    "weight": wishlist_entry["weight"],
-                    "share": wishlist_entry["share"],
-                    "average_elo": wishlist_entry["average_elo"],
+                "buckets": {
+                    bucket: {
+                        "count": metrics["count"],
+                        "weight": metrics["weight"],
+                        "share": metrics["share"],
+                        "average_elo": metrics["average_elo"],
+                    }
+                    for bucket, metrics in bucket_entries.items()
                 },
                 "total": {
                     "count": total_count,
@@ -161,9 +193,8 @@ def summarize_genre_preferences() -> Dict[str, Any]:
                     "share": (total_weight / combined_weight) if combined_weight else 0.0,
                     "average_elo": total_average_elo,
                 },
-                "dominant": _determine_dominant_list(
-                    backlog_entry["weight"], wishlist_entry["weight"]
-                ),
+                "dominant": dominant_bucket,
+                "dominant_share": dominant_share,
             }
         )
 
@@ -171,20 +202,47 @@ def summarize_genre_preferences() -> Dict[str, Any]:
         key=lambda item: (item["total"]["weight"], item["total"]["count"]), reverse=True
     )
 
+    bucket_metadata = {
+        bucket: _BUCKET_METADATA.get(bucket, _resolve_bucket_metadata(bucket))
+        for bucket in _INSIGHT_BUCKETS
+    }
+
+    for bucket, summary in status_summaries.items():
+        metadata = bucket_metadata.get(bucket, {})
+        summary["label"] = metadata.get("label", _humanize_bucket(bucket))
+        summary["description"] = metadata.get("description", "")
+        if metadata.get("color"):
+            summary["color"] = metadata["color"]
+
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
-        "backlog": status_summaries["backlog"],
-        "wishlist": status_summaries["wishlist"],
+        "bucket_order": list(_INSIGHT_BUCKETS),
+        "bucket_metadata": bucket_metadata,
+        "buckets": status_summaries,
         "genres": combined_genres,
     }
 
 
-def _determine_dominant_list(backlog_weight: float, wishlist_weight: float) -> str:
-    delta = backlog_weight - wishlist_weight
+def _determine_dominant_bucket(
+    bucket_weights: dict[str, float], total_weight: float
+) -> tuple[str, float | None]:
     tolerance = 1e-6
-    if abs(delta) <= tolerance:
-        return "balanced"
-    return "backlog" if delta > 0 else "wishlist"
+    if total_weight <= tolerance:
+        return "balanced", None
+
+    sorted_weights = sorted(
+        bucket_weights.items(), key=lambda item: item[1], reverse=True
+    )
+    top_bucket, top_weight = sorted_weights[0]
+    if top_weight <= tolerance:
+        return "balanced", None
+
+    tied = [bucket for bucket, weight in sorted_weights if abs(weight - top_weight) <= tolerance]
+    if len(tied) > 1:
+        return "balanced", None
+
+    share = top_weight / total_weight if total_weight else None
+    return top_bucket, share
 
 
 def summarize_genre_sentiment() -> Dict[str, Any]:
@@ -274,6 +332,11 @@ def summarize_genre_sentiment() -> Dict[str, Any]:
     return {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "genres": genres_summary,
+        "bucket_order": list(_INSIGHT_BUCKETS),
+        "bucket_metadata": {
+            bucket: _BUCKET_METADATA.get(bucket, _resolve_bucket_metadata(bucket))
+            for bucket in _INSIGHT_BUCKETS
+        },
     }
 
 
@@ -285,6 +348,7 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
     preference_lookup = {
         entry["genre"]: entry for entry in preference_summary.get("genres", [])
     }
+    preference_buckets = preference_summary.get("bucket_metadata", {})
 
     genres_payload = []
     for entry in sentiment_summary.get("genres", []):
@@ -295,8 +359,9 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
         interest_score = (average_elo / 20.0) if average_elo is not None else None
 
         status_interest: dict[str, Any] = {}
+        bucket_entries = preference_entry.get("buckets", {})
         for bucket in _INSIGHT_BUCKETS:
-            status_metrics = preference_entry.get(bucket, {})
+            status_metrics = bucket_entries.get(bucket, {})
             status_interest[bucket] = {
                 "average_elo": status_metrics.get("average_elo"),
                 "share": status_metrics.get("share"),
@@ -323,6 +388,11 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
     return {
         "generated_at": sentiment_summary.get("generated_at"),
         "genres": genres_payload,
+        "bucket_order": list(_INSIGHT_BUCKETS),
+        "bucket_metadata": {
+            bucket: preference_buckets.get(bucket, _BUCKET_METADATA.get(bucket, {}))
+            for bucket in _INSIGHT_BUCKETS
+        },
     }
 
 

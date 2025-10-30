@@ -22,31 +22,31 @@ _STATUS_DEFINITIONS: tuple[StatusDefinition, ...] = (
     StatusDefinition(
         value="playing",
         label="Playing",
-        insight_bucket="backlog",
+        insight_bucket="playing",
         requires_purchase_date=True,
     ),
     StatusDefinition(
         value="occasional",
         label="Occasional",
-        insight_bucket="backlog",
+        insight_bucket="occasional",
         requires_purchase_date=True,
     ),
     StatusDefinition(
         value="story_clear",
         label="Story clear",
-        insight_bucket="backlog",
+        insight_bucket="story_clear",
         requires_purchase_date=True,
     ),
     StatusDefinition(
         value="full_clear",
         label="Full clear",
-        insight_bucket="backlog",
+        insight_bucket="full_clear",
         requires_purchase_date=True,
     ),
     StatusDefinition(
         value="dropped",
         label="Dropped",
-        insight_bucket="backlog",
+        insight_bucket="dropped",
         requires_purchase_date=True,
     ),
     StatusDefinition(
@@ -55,6 +55,54 @@ _STATUS_DEFINITIONS: tuple[StatusDefinition, ...] = (
         insight_bucket="wishlist",
         requires_purchase_date=False,
     ),
+)
+
+INSIGHT_BUCKET_METADATA: Dict[str, dict[str, str]] = {
+    "backlog": {
+        "label": "Backlog",
+        "description": "Owned games that haven't been started yet.",
+        "color": "#5cffba",
+    },
+    "playing": {
+        "label": "Playing now",
+        "description": "Currently active or in-progress titles.",
+        "color": "#60a5fa",
+    },
+    "occasional": {
+        "label": "Occasional rotation",
+        "description": "Games you revisit casually or keep in light rotation.",
+        "color": "#facc15",
+    },
+    "story_clear": {
+        "label": "Story clear",
+        "description": "Main story finished with optional content remaining.",
+        "color": "#34d399",
+    },
+    "full_clear": {
+        "label": "Full clear",
+        "description": "Completed or mastered runs with everything checked off.",
+        "color": "#a855f7",
+    },
+    "dropped": {
+        "label": "Dropped",
+        "description": "Titles you've decided to set aside for now.",
+        "color": "#f87171",
+    },
+    "wishlist": {
+        "label": "Wishlist",
+        "description": "Games you're considering picking up next.",
+        "color": "#f97316",
+    },
+}
+
+INSIGHT_BUCKET_DISPLAY_ORDER: tuple[str, ...] = (
+    "backlog",
+    "playing",
+    "occasional",
+    "story_clear",
+    "full_clear",
+    "dropped",
+    "wishlist",
 )
 
 
