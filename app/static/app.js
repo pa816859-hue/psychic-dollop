@@ -2,6 +2,11 @@ const state = {
   cachedGames: [],
   engagementColorMap: new Map(),
   engagementPaletteIndex: 0,
+  insightBuckets: {
+    metadata: {},
+    order: [],
+    summaries: {},
+  },
 };
 
 const ENGAGEMENT_PALETTE = [
@@ -398,6 +403,61 @@ function formatAverageElo(value) {
   return `Avg ELO ${Math.round(value)}`;
 }
 
+function hexToRgba(hex, alpha = 0.15) {
+  if (!hex) return null;
+  const normalized = hex.replace(/[^0-9a-fA-F]/g, "");
+  if (normalized.length !== 3 && normalized.length !== 6) {
+    return null;
+  }
+  const chunkSize = normalized.length === 3 ? 1 : 2;
+  const values = normalized.match(new RegExp(`.{${chunkSize}}`, "g"));
+  if (!values) return null;
+  const channels = values.map((chunk) => {
+    const expanded = chunkSize === 1 ? chunk + chunk : chunk;
+    const parsed = parseInt(expanded, 16);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  });
+  if (channels.length !== 3) return null;
+  const [r, g, b] = channels;
+  const clamped = Math.max(0, Math.min(1, alpha));
+  return `rgba(${r}, ${g}, ${b}, ${clamped})`;
+}
+
+function resolveBucketLabel(bucket, metadata = {}) {
+  if (!bucket || bucket === "total") {
+    return "All statuses";
+  }
+  const entry = metadata[bucket];
+  if (entry && entry.label) {
+    return entry.label;
+  }
+  return String(bucket)
+    .replace(/[-_]+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Unknown";
+}
+
+function resolveBucketDescription(bucket, metadata = {}) {
+  if (!bucket || bucket === "total") {
+    return "Blend every tracked list together for a big-picture view.";
+  }
+  const entry = metadata[bucket];
+  return entry?.description || "";
+}
+
+function getBucketColor(bucket, metadata = {}) {
+  if (!bucket || bucket === "total") return null;
+  const entry = metadata[bucket];
+  return entry?.color || null;
+}
+
+function getBucketOrderIndex(bucket, order = []) {
+  const index = order.indexOf(bucket);
+  return index === -1 ? order.length : index;
+}
+
 function formatPlaytimeMinutes(minutes) {
   if (!Number.isFinite(minutes) || minutes <= 0) {
     return "0 hrs";
@@ -765,15 +825,19 @@ function renderEngagementCallouts(root, summary) {
   });
 }
 
-function describeDominance(dominant) {
-  switch (dominant) {
-    case "backlog":
-      return "Backlog leaning";
-    case "wishlist":
-      return "Wishlist leaning";
-    default:
-      return "Balanced mix";
+function describeDominance(entry, metadata = {}) {
+  if (!entry || !entry.dominant) {
+    return "Balanced mix";
   }
+  if (entry.dominant === "balanced") {
+    return "Balanced mix";
+  }
+  const label = resolveBucketLabel(entry.dominant, metadata);
+  const share = entry.dominant_share;
+  if (Number.isFinite(share) && share > 0) {
+    return `${label} leads (${formatPercent(share)})`;
+  }
+  return `${label} leads`;
 }
 
 function renderGenreInsights(root, summary) {
@@ -786,23 +850,43 @@ function renderGenreInsights(root, summary) {
   canvas.innerHTML = "";
   canvas.dataset.state = "loaded";
 
-  if (!summary || !Array.isArray(summary.genres) || summary.genres.length === 0) {
+  const genres = Array.isArray(summary?.genres) ? summary.genres : [];
+  if (genres.length === 0) {
     canvas.innerHTML =
       '<p class="genre-insights__empty">No genre insights are available yet. Add more games with genres to see trends.</p>';
     return;
   }
 
+  const bucketMetadata = summary?.bucket_metadata || {};
+  const bucketOrder = Array.isArray(summary?.bucket_order)
+    ? summary.bucket_order
+    : Object.keys(bucketMetadata);
+  const bucketSummaries = summary?.buckets || {};
+  const availableBuckets = Array.from(
+    new Set(
+      (bucketOrder.length > 0 ? bucketOrder : Object.keys(bucketSummaries)).filter(
+        Boolean
+      )
+    )
+  );
+
+  state.insightBuckets = {
+    metadata: bucketMetadata,
+    order: bucketOrder,
+    summaries: bucketSummaries,
+  };
+
   const metrics = [
     {
       key: "share",
       label: "Weighted share",
-      extractor: (entry) => entry?.total?.share ?? 0,
+      extractor: (source) => source?.share ?? 0,
       formatter: (value) => `${formatPercent(value)} share`,
     },
     {
       key: "count",
       label: "Game count",
-      extractor: (entry) => entry?.total?.count ?? 0,
+      extractor: (source) => source?.count ?? 0,
       formatter: (value) => {
         const rounded = Math.round(value);
         const suffix = rounded === 1 ? " game" : " games";
@@ -812,16 +896,27 @@ function renderGenreInsights(root, summary) {
     {
       key: "average_elo",
       label: "Avg ELO",
-      extractor: (entry) => entry?.total?.average_elo ?? null,
+      extractor: (source) => source?.average_elo ?? null,
       formatter: (value) =>
         Number.isFinite(value) ? `${Math.round(value)} ELO` : "No rating data",
     },
   ];
 
   let activeMetric = metrics[0];
+  let activeBucket = "total";
 
   const controls = document.createElement("div");
   controls.className = "genre-insights__controls";
+
+  const controlBar = document.createElement("div");
+  controlBar.className = "genre-insights__control-bar";
+
+  const metricGroup = document.createElement("div");
+  metricGroup.className = "genre-insights__toggle-group";
+  const metricLabel = document.createElement("span");
+  metricLabel.className = "genre-insights__group-label";
+  metricLabel.textContent = "Rank by";
+  metricGroup.appendChild(metricLabel);
 
   metrics.forEach((metric) => {
     const button = document.createElement("button");
@@ -835,14 +930,84 @@ function renderGenreInsights(root, summary) {
     button.addEventListener("click", () => {
       if (activeMetric.key === metric.key) return;
       activeMetric = metric;
-      controls.querySelectorAll(".is-active").forEach((element) => {
-        element.classList.remove("is-active");
-      });
+      metricGroup
+        .querySelectorAll(".genre-insights__toggle.is-active")
+        .forEach((element) => element.classList.remove("is-active"));
       button.classList.add("is-active");
       updateLists();
     });
-    controls.appendChild(button);
+    metricGroup.appendChild(button);
   });
+  controlBar.appendChild(metricGroup);
+
+  const bucketGroup = document.createElement("div");
+  bucketGroup.className = "genre-insights__toggle-group";
+  const bucketGroupLabel = document.createElement("span");
+  bucketGroupLabel.className = "genre-insights__group-label";
+  bucketGroupLabel.textContent = "Focus on";
+  bucketGroup.appendChild(bucketGroupLabel);
+
+  const viewModes = [
+    {
+      key: "total",
+      label: resolveBucketLabel("total"),
+      description: resolveBucketDescription("total", bucketMetadata),
+    },
+    ...availableBuckets.map((bucket) => ({
+      key: bucket,
+      label: resolveBucketLabel(bucket, bucketMetadata),
+      description: resolveBucketDescription(bucket, bucketMetadata),
+    })),
+  ];
+
+  viewModes.forEach((mode) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "genre-insights__toggle";
+    button.dataset.bucket = mode.key;
+    button.textContent = mode.label;
+    if (mode.key === activeBucket) {
+      button.classList.add("is-active");
+      button.setAttribute("aria-pressed", "true");
+    } else {
+      button.setAttribute("aria-pressed", "false");
+    }
+    const hasData = bucketHasData(mode.key);
+    if (mode.description) {
+      button.title = mode.description;
+    }
+    if (!hasData) {
+      button.classList.add("is-empty");
+      if (!button.title) {
+        button.title = `${mode.label}: no tracked data yet.`;
+      }
+    }
+    button.addEventListener("click", () => {
+      if (activeBucket === mode.key) {
+        return;
+      }
+      activeBucket = mode.key;
+      bucketGroup
+        .querySelectorAll(".genre-insights__toggle.is-active")
+        .forEach((element) => {
+          element.classList.remove("is-active");
+          element.setAttribute("aria-pressed", "false");
+        });
+      button.classList.add("is-active");
+      button.setAttribute("aria-pressed", "true");
+      bucketHint.textContent = getBucketHint(activeBucket);
+      updateLists();
+    });
+    bucketGroup.appendChild(button);
+  });
+
+  controlBar.appendChild(bucketGroup);
+  controls.appendChild(controlBar);
+
+  const bucketHint = document.createElement("p");
+  bucketHint.className = "genre-insights__hint";
+  bucketHint.textContent = getBucketHint(activeBucket);
+  controls.appendChild(bucketHint);
 
   const listsWrapper = document.createElement("div");
   listsWrapper.className = "genre-insights__lists";
@@ -871,9 +1036,48 @@ function renderGenreInsights(root, summary) {
   canvas.appendChild(controls);
   canvas.appendChild(listsWrapper);
 
+  function bucketHasData(bucketKey) {
+    if (bucketKey === "total") {
+      return genres.some((entry) => (entry?.total?.weight ?? 0) > 0);
+    }
+    const summaryEntry = bucketSummaries[bucketKey];
+    if (Number(summaryEntry?.total_weight ?? 0) > 0) {
+      return true;
+    }
+    return genres.some(
+      (entry) => (entry?.buckets?.[bucketKey]?.weight ?? 0) > 0
+    );
+  }
+
+  function getBucketHint(bucketKey) {
+    if (bucketKey === "total") {
+      const totalTracked = Object.values(bucketSummaries).reduce(
+        (acc, entry) => acc + (entry?.total_games ?? 0),
+        0
+      );
+      if (totalTracked > 0) {
+        const suffix = totalTracked === 1 ? "tracked title" : "tracked titles";
+        return `All statuses: ${totalTracked.toLocaleString()} ${suffix} across every list.`;
+      }
+      return "All statuses: add more games to see aggregate genre trends.";
+    }
+    const label = resolveBucketLabel(bucketKey, bucketMetadata);
+    const summaryEntry = bucketSummaries[bucketKey];
+    if (summaryEntry?.total_games) {
+      const suffix = summaryEntry.total_games === 1 ? "title" : "titles";
+      return `${label}: ${summaryEntry.total_games.toLocaleString()} ${suffix} tagged with genres.`;
+    }
+    const description = resolveBucketDescription(bucketKey, bucketMetadata);
+    return description || `No ${label.toLowerCase()} entries logged yet.`;
+  }
+
   function renderList(target, entries, metric, isBottom = false) {
     target.innerHTML = "";
-    entries.forEach(({ entry, value }) => {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return;
+    }
+
+    entries.forEach(({ entry, source, value }) => {
       const item = document.createElement("li");
       item.className = "genre-insights__item";
 
@@ -889,7 +1093,11 @@ function renderGenreInsights(root, summary) {
       if (isBottom) {
         metricValue.classList.add("genre-insights__item-value--low");
       }
-      metricValue.textContent = metric.formatter(value, entry);
+      metricValue.textContent = metric.formatter(value, {
+        entry,
+        source,
+        bucket: activeBucket,
+      });
 
       header.appendChild(name);
       header.appendChild(metricValue);
@@ -897,52 +1105,167 @@ function renderGenreInsights(root, summary) {
 
       const breakdown = document.createElement("div");
       breakdown.className = "genre-insights__item-breakdown";
-      breakdown.innerHTML = buildGenreBreakdown(entry);
+      const highlightBucket =
+        activeBucket === "total"
+          ? entry.dominant === "balanced"
+            ? null
+            : entry.dominant
+          : activeBucket;
+      breakdown.innerHTML = buildGenreBreakdown(entry, {
+        metadata: bucketMetadata,
+        order: availableBuckets,
+        highlight: highlightBucket,
+      });
       item.appendChild(breakdown);
 
       const dominance = document.createElement("p");
-      dominance.className = `genre-insights__item-dominance genre-insights__item-dominance--${entry.dominant}`;
-      dominance.textContent = describeDominance(entry.dominant);
+      dominance.className = "genre-insights__item-dominance";
+      const dominanceBucket = entry.dominant || "balanced";
+      dominance.dataset.bucket = dominanceBucket;
+      dominance.textContent = describeDominance(entry, bucketMetadata);
+      if (dominanceBucket !== "balanced") {
+        const color = getBucketColor(dominanceBucket, bucketMetadata);
+        if (color) {
+          dominance.style.setProperty("--dominance-color", color);
+        }
+      }
       item.appendChild(dominance);
 
       target.appendChild(item);
     });
   }
 
-  function buildGenreBreakdown(entry) {
-    const totalWeight = entry?.total?.weight ?? 0;
-    const backlogWeight = entry?.backlog?.weight ?? 0;
-    const wishlistWeight = entry?.wishlist?.weight ?? 0;
+  function buildGenreBreakdown(entry, { metadata, order, highlight }) {
+    const buckets = entry?.buckets || {};
+    const contributions = Object.entries(buckets).filter(
+      ([, metrics]) => metrics && Number(metrics.weight ?? 0) > 0
+    );
+    if (contributions.length === 0) {
+      return '<span class="genre-insights__breakdown-empty">No genre breakdown yet.</span>';
+    }
 
-    const backlogShare = totalWeight ? backlogWeight / totalWeight : 0;
-    const wishlistShare = totalWeight ? wishlistWeight / totalWeight : 0;
+    contributions.sort((a, b) => {
+      const aWeight = Number.isFinite(a[1].weight) ? a[1].weight : 0;
+      const bWeight = Number.isFinite(b[1].weight) ? b[1].weight : 0;
+      if (Math.abs(bWeight - aWeight) > 1e-6) {
+        return bWeight - aWeight;
+      }
+      return getBucketOrderIndex(a[0], order) - getBucketOrderIndex(b[0], order);
+    });
 
-    const backlogLabel = backlogWeight
-      ? `${formatPercent(backlogShare)} backlog • ${formatAverageElo(entry.backlog.average_elo)}`
-      : "No backlog data";
-    const wishlistLabel = wishlistWeight
-      ? `${formatPercent(wishlistShare)} wishlist • ${formatAverageElo(entry.wishlist.average_elo)}`
-      : "No wishlist data";
+    const highlightBucket =
+      highlight && highlight !== "balanced" ? highlight : null;
 
-    return `<span>${backlogLabel}</span><span>${wishlistLabel}</span>`;
+    let topContributions = contributions.slice(0, 3);
+    if (highlightBucket) {
+      const highlightEntry = contributions.find(
+        ([bucket]) => bucket === highlightBucket
+      );
+      if (highlightEntry) {
+        topContributions = [
+          highlightEntry,
+          ...topContributions.filter(([bucket]) => bucket !== highlightBucket),
+        ];
+      }
+    }
+
+    const uniqueMap = new Map();
+    topContributions.forEach(([bucket, metrics]) => {
+      if (!uniqueMap.has(bucket)) {
+        uniqueMap.set(bucket, metrics);
+      }
+    });
+
+    let finalContributions = Array.from(uniqueMap.entries()).sort((a, b) => {
+      const aWeight = Number.isFinite(a[1].weight) ? a[1].weight : 0;
+      const bWeight = Number.isFinite(b[1].weight) ? b[1].weight : 0;
+      if (Math.abs(bWeight - aWeight) > 1e-6) {
+        return bWeight - aWeight;
+      }
+      return getBucketOrderIndex(a[0], order) - getBucketOrderIndex(b[0], order);
+    });
+
+    if (finalContributions.length > 3) {
+      finalContributions = finalContributions.slice(0, 3);
+    }
+
+    if (
+      highlightBucket &&
+      !finalContributions.some(([bucket]) => bucket === highlightBucket)
+    ) {
+      const highlightEntry = contributions.find(
+        ([bucket]) => bucket === highlightBucket
+      );
+      if (highlightEntry) {
+        finalContributions[finalContributions.length - 1] = highlightEntry;
+      }
+    }
+
+    const pieces = finalContributions.map(([bucket, metrics]) => {
+      const label = resolveBucketLabel(bucket, metadata);
+      const shareLabel = formatPercent(metrics.share);
+      const averageLabel = formatAverageElo(metrics.average_elo);
+      const classes = ["genre-insights__breakdown-item"];
+      if (bucket === highlightBucket) {
+        classes.push("is-highlighted");
+      }
+      const styles = [];
+      const color = getBucketColor(bucket, metadata);
+      if (color) {
+        styles.push(`--breakdown-accent:${color}`);
+        const accentBg = hexToRgba(color, 0.18) || hexToRgba(color, 0.12);
+        if (accentBg) {
+          styles.push(`--breakdown-accent-bg:${accentBg}`);
+        }
+      }
+      const styleAttr = styles.length ? ` style="${styles.join(";")}"` : "";
+      return `<span class="${classes.join(" ")}" data-bucket="${bucket}"${styleAttr}>${label}: ${shareLabel} • ${averageLabel}</span>`;
+    });
+
+    const extraCount = contributions.length - finalContributions.length;
+    if (extraCount > 0) {
+      const suffix = extraCount === 1 ? "list" : "lists";
+      pieces.push(
+        `<span class="genre-insights__breakdown-more">+${extraCount} more ${suffix}</span>`
+      );
+    }
+
+    return pieces.join(" ");
   }
 
   function updateLists() {
-    const decorated = summary.genres.map((entry) => ({
-      entry,
-      value: activeMetric.extractor(entry),
-    }));
+    bucketHint.textContent = getBucketHint(activeBucket);
 
-    const filtered = decorated.filter(({ entry, value }) => {
+    const decorated = genres.map((entry) => {
+      const source =
+        activeBucket === "total"
+          ? entry.total
+          : entry?.buckets?.[activeBucket];
+      const value = activeMetric.extractor(source);
+      return { entry, source, value };
+    });
+
+    const filtered = decorated.filter(({ source, value }) => {
+      if (!source) return false;
       if (activeMetric.key === "average_elo") {
         return Number.isFinite(value);
       }
-      return Number.isFinite(value) && value > 0 && entry.total?.weight > 0;
+      if (activeMetric.key === "count") {
+        return Number.isFinite(value) && value > 0;
+      }
+      const weight = source.weight ?? 0;
+      return Number.isFinite(value) && weight > 0;
     });
 
     if (filtered.length === 0) {
-      topList.innerHTML =
-        '<li class="genre-insights__empty">Not enough data to rank genres yet.</li>';
+      const emptyMessage =
+        activeBucket === "total"
+          ? "Not enough data to rank genres yet."
+          : `No ${resolveBucketLabel(
+              activeBucket,
+              bucketMetadata
+            )} data available yet.`;
+      topList.innerHTML = `<li class="genre-insights__empty">${emptyMessage}</li>`;
       bottomList.innerHTML = "";
       return;
     }
@@ -962,7 +1285,6 @@ function renderGenreInsights(root, summary) {
 
   updateLists();
 }
-
 function renderGenreSentimentComparison(root, summary) {
   const sentimentChart = root.querySelector('[data-insights-chart="genre-sentiment"]');
   if (!sentimentChart) return;
@@ -979,6 +1301,9 @@ function renderGenreSentimentComparison(root, summary) {
       '<p class="genre-sentiment__empty">Add more tracked sessions to compare hype and enjoyment by genre.</p>';
     return;
   }
+
+  const bucketMetadata = state?.insightBuckets?.metadata || {};
+  const bucketOrder = state?.insightBuckets?.order || [];
 
   const list = document.createElement("ul");
   list.className = "genre-sentiment__list";
@@ -1056,19 +1381,39 @@ function renderGenreSentimentComparison(root, summary) {
     item.appendChild(gap);
 
     const statuses = entry?.sentiment?.statuses ?? {};
-    const statusKeys = Object.keys(statuses);
+    const statusEntries = Object.entries(statuses).filter(([, metrics]) => {
+      const playtime = Number(metrics?.total_playtime_minutes ?? 0);
+      const score = metrics?.weighted_sentiment;
+      return Number.isFinite(score) || playtime > 0;
+    });
     const statusLabel = document.createElement("p");
     statusLabel.className = "genre-sentiment__status";
-    if (statusKeys.length === 0) {
-      statusLabel.textContent = "No backlog or wishlist sentiment available yet.";
+    if (statusEntries.length === 0) {
+      statusLabel.textContent = "No status-specific sentiment available yet.";
     } else {
-      statusLabel.innerHTML = statusKeys
-        .map((key) => {
-          const metrics = statuses[key] || {};
-          const label = key === "backlog" ? "Backlog" : "Wishlist";
-          const playtime = formatPlaytimeMinutes(metrics.total_playtime_minutes || 0);
-          const score = formatScorePoints(metrics.weighted_sentiment);
-          return `<span>${label}: ${playtime} • ${score}</span>`;
+      statusEntries.sort(
+        (a, b) =>
+          getBucketOrderIndex(a[0], bucketOrder) -
+          getBucketOrderIndex(b[0], bucketOrder)
+      );
+      statusLabel.innerHTML = statusEntries
+        .map(([bucket, metrics]) => {
+          const label = resolveBucketLabel(bucket, bucketMetadata);
+          const playtime = formatPlaytimeMinutes(
+            metrics?.total_playtime_minutes ?? 0
+          );
+          const score = formatScorePoints(metrics?.weighted_sentiment);
+          const styles = [];
+          const color = getBucketColor(bucket, bucketMetadata);
+          if (color) {
+            styles.push(`--status-accent:${color}`);
+            const accentBg = hexToRgba(color, 0.18) || hexToRgba(color, 0.12);
+            if (accentBg) {
+              styles.push(`--status-accent-bg:${accentBg}`);
+            }
+          }
+          const styleAttr = styles.length ? ` style="${styles.join(";")}"` : "";
+          return `<span class="genre-sentiment__status-chip"${styleAttr}>${label}: ${playtime} • ${score}</span>`;
         })
         .join(" ");
     }
@@ -1336,11 +1681,20 @@ async function initInsightsPage() {
         fetchJSON("/api/insights/engagement-trend"),
       ]);
 
+    state.insightBuckets = {
+      metadata: summary?.bucket_metadata || {},
+      order: summary?.bucket_order || [],
+      summaries: summary?.buckets || {},
+    };
+
+    const bucketSummaries = summary?.buckets || {};
+
     const backlogMetric = root.querySelector(
       '[data-insights-metric="backlog"] .insights-card__value'
     );
-    if (backlogMetric && summary?.backlog) {
-      const totalGames = summary.backlog.total_games ?? 0;
+    const backlogSummary = bucketSummaries.backlog;
+    if (backlogMetric && backlogSummary) {
+      const totalGames = backlogSummary.total_games ?? 0;
       backlogMetric.textContent = `${totalGames.toLocaleString()} game${
         totalGames === 1 ? "" : "s"
       }`;
@@ -1349,8 +1703,9 @@ async function initInsightsPage() {
     const wishlistMetric = root.querySelector(
       '[data-insights-metric="wishlist"] .insights-card__value'
     );
-    if (wishlistMetric && summary?.wishlist) {
-      const totalGames = summary.wishlist.total_games ?? 0;
+    const wishlistSummary = bucketSummaries.wishlist;
+    if (wishlistMetric && wishlistSummary) {
+      const totalGames = wishlistSummary.total_games ?? 0;
       wishlistMetric.textContent = `${totalGames.toLocaleString()} title${
         totalGames === 1 ? "" : "s"
       }`;

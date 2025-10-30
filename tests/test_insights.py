@@ -46,8 +46,13 @@ def test_summarize_genre_preferences_weights_multi_genre_games(app_instance):
 
         summary = summarize_genre_preferences()
 
-    backlog_genres = {entry["genre"]: entry for entry in summary["backlog"]["genres"]}
-    wishlist_genres = {entry["genre"]: entry for entry in summary["wishlist"]["genres"]}
+    bucket_summaries = summary["buckets"]
+    backlog_genres = {
+        entry["genre"]: entry for entry in bucket_summaries["backlog"]["genres"]
+    }
+    wishlist_genres = {
+        entry["genre"]: entry for entry in bucket_summaries["wishlist"]["genres"]
+    }
     combined_genres = {entry["genre"]: entry for entry in summary["genres"]}
 
     action_backlog = backlog_genres["Action"]
@@ -74,7 +79,11 @@ def test_summarize_genre_preferences_weights_multi_genre_games(app_instance):
     puzzle_combined = combined_genres["Puzzle"]
     assert puzzle_combined["dominant"] == "wishlist"
     assert puzzle_combined["total"]["weight"] == pytest.approx(1.5)
-    assert puzzle_combined["backlog"]["weight"] == pytest.approx(0.0)
+    assert (
+        puzzle_combined["buckets"]["backlog"]["weight"] == pytest.approx(0.0)
+    )
+    assert puzzle_combined["buckets"]["wishlist"]["weight"] == pytest.approx(1.5)
+    assert "playing" in summary["bucket_metadata"]
 
 
 def test_summarize_lifecycle_metrics(app_instance):
