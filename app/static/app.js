@@ -278,6 +278,20 @@ function formatAverageElo(value) {
   return `Avg ELO ${Math.round(value)}`;
 }
 
+function formatPlaytimeMinutes(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return "0 hrs";
+  }
+  const hours = minutes / 60;
+  const formatted = hours >= 10 ? hours.toFixed(1) : hours.toFixed(2);
+  return `${Number(formatted)} hr${Number(formatted) === 1 ? "" : "s"}`;
+}
+
+function formatScorePoints(value) {
+  if (!Number.isFinite(value)) return "—";
+  return `${Math.round(value)} pts`;
+}
+
 function describeDominance(dominant) {
   switch (dominant) {
     case "backlog":
@@ -476,6 +490,123 @@ function renderGenreInsights(root, summary) {
   updateLists();
 }
 
+function renderGenreSentimentComparison(root, summary) {
+  const sentimentChart = root.querySelector('[data-insights-chart="genre-sentiment"]');
+  if (!sentimentChart) return;
+
+  const canvas = sentimentChart.querySelector(".insights-chart__canvas");
+  if (!canvas) return;
+
+  canvas.innerHTML = "";
+  canvas.dataset.state = "loaded";
+
+  const genres = Array.isArray(summary?.genres) ? summary.genres : [];
+  if (genres.length === 0) {
+    canvas.innerHTML =
+      '<p class="genre-sentiment__empty">Add more tracked sessions to compare hype and enjoyment by genre.</p>';
+    return;
+  }
+
+  const list = document.createElement("ul");
+  list.className = "genre-sentiment__list";
+
+  const clamp = (value) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+
+  genres.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = "genre-sentiment__item";
+
+    const header = document.createElement("header");
+    header.className = "genre-sentiment__header";
+
+    const name = document.createElement("h3");
+    name.textContent = entry.genre || "Unknown";
+    header.appendChild(name);
+
+    const playtimeLabel = document.createElement("span");
+    playtimeLabel.className = "genre-sentiment__meta";
+    const totalMinutes = entry?.sentiment?.total_playtime_minutes ?? 0;
+    playtimeLabel.textContent = `${formatPlaytimeMinutes(totalMinutes)} played`;
+    header.appendChild(playtimeLabel);
+
+    item.appendChild(header);
+
+    const interestScore = entry?.interest?.interest_score;
+    const enjoymentScore = entry?.sentiment?.weighted_sentiment;
+
+    const bars = document.createElement("div");
+    bars.className = "genre-sentiment__bars";
+
+    const buildBar = (label, value, type) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = `genre-sentiment__bar genre-sentiment__bar--${type}`;
+
+      const fill = document.createElement("div");
+      fill.className = `genre-sentiment__fill genre-sentiment__fill--${type}`;
+      if (Number.isFinite(value)) {
+        fill.style.setProperty("--fill-width", `${clamp(value)}%`);
+        fill.innerHTML = `<span>${label} ${formatScorePoints(value)}</span>`;
+      } else {
+        fill.classList.add("is-empty");
+        fill.innerHTML = `<span>${label} —</span>`;
+      }
+
+      wrapper.appendChild(fill);
+      return wrapper;
+    };
+
+    bars.appendChild(buildBar("Interest", interestScore, "interest"));
+    bars.appendChild(buildBar("Enjoyment", enjoymentScore, "enjoyment"));
+    item.appendChild(bars);
+
+    const gap = document.createElement("p");
+    gap.className = "genre-sentiment__gap";
+    if (Number.isFinite(interestScore) && Number.isFinite(enjoymentScore)) {
+      const delta = interestScore - enjoymentScore;
+      const magnitude = Math.round(Math.abs(delta));
+      if (delta >= 8) {
+        gap.textContent = `Hype outpaces enjoyment by ${magnitude} pt${
+          magnitude === 1 ? "" : "s"
+        }.`;
+        gap.classList.add("genre-sentiment__gap--warning");
+      } else if (delta <= -8) {
+        gap.textContent = `Enjoyment is surpassing expectations by ${magnitude} pt${
+          magnitude === 1 ? "" : "s"
+        }.`;
+        gap.classList.add("genre-sentiment__gap--positive");
+      } else {
+        gap.textContent = "Hype and enjoyment are closely aligned.";
+      }
+    } else {
+      gap.textContent = "More data is needed to compare hype and enjoyment.";
+    }
+    item.appendChild(gap);
+
+    const statuses = entry?.sentiment?.statuses ?? {};
+    const statusKeys = Object.keys(statuses);
+    const statusLabel = document.createElement("p");
+    statusLabel.className = "genre-sentiment__status";
+    if (statusKeys.length === 0) {
+      statusLabel.textContent = "No backlog or wishlist sentiment available yet.";
+    } else {
+      statusLabel.innerHTML = statusKeys
+        .map((key) => {
+          const metrics = statuses[key] || {};
+          const label = key === "backlog" ? "Backlog" : "Wishlist";
+          const playtime = formatPlaytimeMinutes(metrics.total_playtime_minutes || 0);
+          const score = formatScorePoints(metrics.weighted_sentiment);
+          return `<span>${label}: ${playtime} • ${score}</span>`;
+        })
+        .join(" ");
+    }
+    item.appendChild(statusLabel);
+
+    list.appendChild(item);
+  });
+
+  canvas.appendChild(list);
+}
+
 async function initInsightsPage() {
   const root = document.querySelector("[data-insights-root]");
   if (!root) return;
@@ -490,7 +621,10 @@ async function initInsightsPage() {
   root.dataset.state = "loading";
 
   try {
-    const summary = await fetchJSON("/api/insights/genres");
+    const [summary, sentimentSummary] = await Promise.all([
+      fetchJSON("/api/insights/genres"),
+      fetchJSON("/api/insights/genre-sentiment"),
+    ]);
 
     const backlogMetric = root.querySelector(
       '[data-insights-metric="backlog"] .insights-card__value'
@@ -513,6 +647,7 @@ async function initInsightsPage() {
     }
 
     renderGenreInsights(root, summary);
+    renderGenreSentimentComparison(root, sentimentSummary);
     root.dataset.state = "loaded";
   } catch (error) {
     console.error("Failed to load insight data", error);
@@ -520,6 +655,13 @@ async function initInsightsPage() {
     if (genreChart) {
       genreChart.innerHTML =
         '<p class="genre-insights__error">Unable to load genre insights right now. Please try again later.</p>';
+    }
+    const sentimentChart = root.querySelector(
+      '[data-insights-chart="genre-sentiment"] .insights-chart__canvas'
+    );
+    if (sentimentChart) {
+      sentimentChart.innerHTML =
+        '<p class="genre-insights__error">Unable to load genre sentiment right now. Please try again later.</p>';
     }
     root.dataset.state = "error";
   }
