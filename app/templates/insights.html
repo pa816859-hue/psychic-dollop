@@ -27,6 +27,24 @@
       <p class="insights-card__value" data-placeholder-text="0 hours">0 hours</p>
       <p class="insights-card__meta">Surface your latest sessions and engagement streaks.</p>
     </article>
+
+    <article class="insights-card" data-lifecycle-metric="avg-to-start" data-placeholder-text="Average days to start will appear here">
+      <h2>Avg Days to Start</h2>
+      <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+      <p class="insights-card__meta">Time between purchasing a game and beginning your first session.</p>
+    </article>
+
+    <article class="insights-card" data-lifecycle-metric="avg-to-finish" data-placeholder-text="Average days to finish will appear here">
+      <h2>Avg Days to Finish</h2>
+      <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+      <p class="insights-card__meta">How long it typically takes to complete a game once started.</p>
+    </article>
+
+    <article class="insights-card" data-lifecycle-metric="avg-purchase-to-finish" data-placeholder-text="Average days purchase to finish will appear here">
+      <h2>Avg Purchase → Finish</h2>
+      <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+      <p class="insights-card__meta">Overall span from picking up a title to rolling credits.</p>
+    </article>
   </section>
 
   <section class="insights__charts" aria-label="Trend visualizations">
@@ -52,6 +70,51 @@
         <p>Compare hype (ELO) against weighted session sentiment to surface genres where excitement outpaces satisfaction.</p>
       </header>
       <div class="insights-chart__canvas" role="img" aria-label="Genre sentiment pending" data-placeholder-text="Awaiting data"></div>
+    </div>
+  </section>
+
+  <section class="insights__lifecycle" aria-label="Lifecycle analytics">
+    <header>
+      <h2>Lifecycle Benchmarks</h2>
+      <p>Understand how quickly games move from purchase to credits and where bottlenecks form.</p>
+    </header>
+
+    <div class="insights__cards insights__cards--lifecycle" aria-label="Lifecycle summary metrics">
+      <article class="insights-card insights-card--compact" data-lifecycle-highlight="median-to-start" data-placeholder-text="Median days to start will appear here">
+        <h3>Median Days to Start</h3>
+        <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+        <p class="insights-card__meta">Half of your started games kicked off within this window.</p>
+      </article>
+
+      <article class="insights-card insights-card--compact" data-lifecycle-highlight="p75-to-start" data-placeholder-text="Percentile range will appear here">
+        <h3>75% Start Within</h3>
+        <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+        <p class="insights-card__meta">Three out of four games begin by this point after purchase.</p>
+      </article>
+
+      <article class="insights-card insights-card--compact" data-lifecycle-highlight="median-to-finish" data-placeholder-text="Median days to finish will appear here">
+        <h3>Median Start → Finish</h3>
+        <p class="insights-card__value" data-placeholder-text="0 days">0 days</p>
+        <p class="insights-card__meta">Typical span between booting up and finishing a title.</p>
+      </article>
+    </div>
+
+    <div class="insights__tables">
+      <article class="insights-table" data-lifecycle-table="durations">
+        <header>
+          <h3>Lifecycle Timing Distribution</h3>
+          <p>Compare medians, typical ranges, and long-tail waits for each stage.</p>
+        </header>
+        <div class="insights-table__content" data-placeholder-text="Lifecycle timing statistics will appear here when enough data is available."></div>
+      </article>
+
+      <article class="insights-table" data-lifecycle-table="aging-backlog">
+        <header>
+          <h3>Aging Backlog Watchlist</h3>
+          <p>Oldest unstarted purchases so you can prioritize what to play next.</p>
+        </header>
+        <div class="insights-table__content" data-placeholder-text="Backlog items that haven't been started yet will appear here."></div>
+      </article>
     </div>
   </section>
 

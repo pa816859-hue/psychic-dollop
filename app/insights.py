@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
+from math import ceil, floor
+from statistics import fmean, median
 from types import SimpleNamespace
 from typing import Any, Dict, Iterable
 
@@ -298,4 +300,141 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
     return {
         "generated_at": sentiment_summary.get("generated_at"),
         "genres": genres_payload,
+    }
+
+
+def _percentile(sorted_values: list[float], percentile: float) -> float | None:
+    if not sorted_values:
+        return None
+    if percentile <= 0:
+        return float(sorted_values[0])
+    if percentile >= 1:
+        return float(sorted_values[-1])
+
+    index = (len(sorted_values) - 1) * percentile
+    lower = floor(index)
+    upper = ceil(index)
+    lower_value = float(sorted_values[lower])
+    upper_value = float(sorted_values[upper])
+    if lower == upper:
+        return lower_value
+    fraction = index - lower
+    return lower_value + (upper_value - lower_value) * fraction
+
+
+def _describe_durations(values: list[int]) -> dict[str, Any]:
+    if not values:
+        return {
+            "count": 0,
+            "min": None,
+            "max": None,
+            "mean": None,
+            "median": None,
+            "percentiles": {"p10": None, "p25": None, "p75": None, "p90": None},
+        }
+
+    sorted_values = sorted(values)
+    return {
+        "count": len(sorted_values),
+        "min": float(sorted_values[0]),
+        "max": float(sorted_values[-1]),
+        "mean": float(fmean(sorted_values)),
+        "median": float(median(sorted_values)),
+        "percentiles": {
+            "p10": _percentile(sorted_values, 0.10),
+            "p25": _percentile(sorted_values, 0.25),
+            "p75": _percentile(sorted_values, 0.75),
+            "p90": _percentile(sorted_values, 0.90),
+        },
+    }
+
+
+def summarize_lifecycle_metrics(*, today: date | None = None, backlog_limit: int = 8) -> Dict[str, Any]:
+    """Generate lifecycle timing metrics for backlog management decisions."""
+
+    reference_date = today or date.today()
+    purchase_to_start_samples: list[dict[str, Any]] = []
+    start_to_finish_samples: list[dict[str, Any]] = []
+    purchase_to_finish_samples: list[dict[str, Any]] = []
+    backlog_waiting: list[dict[str, Any]] = []
+
+    games: Iterable[Game] = Game.query.all()
+    for game in games:
+        purchase_date = getattr(game, "purchase_date", None)
+        start_date = getattr(game, "start_date", None)
+        finish_date = getattr(game, "finish_date", None)
+
+        if purchase_date and start_date:
+            delta = (start_date - purchase_date).days
+            purchase_to_start_samples.append(
+                {
+                    "game_id": game.id,
+                    "title": game.title,
+                    "days": int(delta),
+                    "purchase_date": purchase_date.isoformat(),
+                    "start_date": start_date.isoformat(),
+                }
+            )
+
+        if start_date and finish_date:
+            delta = (finish_date - start_date).days
+            start_to_finish_samples.append(
+                {
+                    "game_id": game.id,
+                    "title": game.title,
+                    "days": int(delta),
+                    "start_date": start_date.isoformat(),
+                    "finish_date": finish_date.isoformat(),
+                }
+            )
+
+        if purchase_date and finish_date:
+            delta = (finish_date - purchase_date).days
+            purchase_to_finish_samples.append(
+                {
+                    "game_id": game.id,
+                    "title": game.title,
+                    "days": int(delta),
+                    "purchase_date": purchase_date.isoformat(),
+                    "finish_date": finish_date.isoformat(),
+                }
+            )
+
+        status = (game.status or "").lower()
+        if status == "backlog" and not start_date:
+            anchor_date = purchase_date
+            if not anchor_date and getattr(game, "created_at", None):
+                anchor_date = game.created_at.date()
+
+            if anchor_date:
+                wait_days = max(0, (reference_date - anchor_date).days)
+                backlog_waiting.append(
+                    {
+                        "game_id": game.id,
+                        "title": game.title,
+                        "days_waiting": int(wait_days),
+                        "purchase_date": purchase_date.isoformat()
+                        if purchase_date
+                        else None,
+                        "added_date": anchor_date.isoformat(),
+                    }
+                )
+
+    def _summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
+        durations = [sample["days"] for sample in samples]
+        statistics = _describe_durations(durations)
+        longest_examples = sorted(samples, key=lambda entry: entry["days"], reverse=True)[:5]
+        return {
+            "statistics": statistics,
+            "longest_examples": longest_examples,
+        }
+
+    backlog_waiting.sort(key=lambda entry: entry["days_waiting"], reverse=True)
+
+    return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "purchase_to_start": _summarize(purchase_to_start_samples),
+        "start_to_finish": _summarize(start_to_finish_samples),
+        "purchase_to_finish": _summarize(purchase_to_finish_samples),
+        "aging_backlog": backlog_waiting[: max(0, int(backlog_limit))],
     }
