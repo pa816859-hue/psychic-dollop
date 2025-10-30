@@ -860,6 +860,232 @@ async function initAddGamePage() {
   clearSteamMetadataPreview();
 }
 
+async function initGameDetailPage() {
+  const container = document.getElementById("game-detail");
+  if (!container) return;
+
+  const gameId = Number(container.dataset.gameId || "");
+  if (!Number.isFinite(gameId) || gameId <= 0) {
+    return;
+  }
+
+  const editToggle = document.getElementById("game-edit-toggle");
+  const editForm = document.getElementById("game-edit-form");
+  const editMessage = document.getElementById("game-edit-message");
+  const editCancel = document.getElementById("game-edit-cancel");
+  const deleteButton = document.getElementById("game-delete-button");
+  const titleInput = document.getElementById("game-edit-title");
+  const statusSelect = document.getElementById("game-edit-status");
+  const purchaseInput = document.getElementById("game-edit-purchase-date");
+  const purchaseField = document.getElementById("game-edit-purchase-field");
+  const startInput = document.getElementById("game-edit-start-date");
+  const finishInput = document.getElementById("game-edit-finish-date");
+  const thoughtsInput = document.getElementById("game-edit-thoughts");
+  const editSubmit = editForm?.querySelector('button[type="submit"]');
+
+  const initialValues = {
+    title: titleInput?.value || "",
+    status: statusSelect?.value || "backlog",
+    purchase: purchaseInput?.value || "",
+    start: startInput?.value || "",
+    finish: finishInput?.value || "",
+    thoughts: thoughtsInput?.value || "",
+  };
+
+  function updatePurchaseRequirement() {
+    if (!statusSelect || !purchaseInput) return;
+    const isBacklog = statusSelect.value === "backlog";
+    purchaseInput.required = isBacklog;
+    if (purchaseField) {
+      purchaseField.classList.toggle("is-optional", !isBacklog);
+    }
+    if (!isBacklog) {
+      purchaseInput.value = "";
+    } else if (!purchaseInput.value) {
+      applyDefaultDateIfEmpty(purchaseInput);
+    }
+  }
+
+  function resetEditForm() {
+    if (!editForm) return;
+    if (titleInput) titleInput.value = initialValues.title;
+    if (statusSelect) statusSelect.value = initialValues.status;
+    if (purchaseInput) purchaseInput.value = initialValues.purchase;
+    if (startInput) startInput.value = initialValues.start;
+    if (finishInput) finishInput.value = initialValues.finish;
+    if (thoughtsInput) thoughtsInput.value = initialValues.thoughts;
+    if (editMessage) editMessage.textContent = "";
+    updatePurchaseRequirement();
+  }
+
+  if (statusSelect) {
+    statusSelect.addEventListener("change", () => {
+      const wasRequired = purchaseInput?.required;
+      updatePurchaseRequirement();
+      if (purchaseInput && !purchaseInput.value && purchaseInput.required && !wasRequired) {
+        applyDefaultDateIfEmpty(purchaseInput);
+      }
+    });
+  }
+
+  if (editToggle && editForm) {
+    editToggle.addEventListener("click", () => {
+      resetEditForm();
+      editForm.classList.toggle("hidden");
+      if (!editForm.classList.contains("hidden") && titleInput) {
+        titleInput.focus();
+      }
+    });
+  }
+
+  if (editCancel && editForm) {
+    editCancel.addEventListener("click", () => {
+      resetEditForm();
+      editForm.classList.add("hidden");
+    });
+  }
+
+  if (deleteButton) {
+    deleteButton.addEventListener("click", async () => {
+      const confirmed = window.confirm("Delete this game? This cannot be undone.");
+      if (!confirmed) return;
+      deleteButton.disabled = true;
+      try {
+        await fetchJSON(`/api/games/${gameId}`, { method: "DELETE" });
+        window.location.href = "/library";
+      } catch (error) {
+        deleteButton.disabled = false;
+        alert(error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
+
+  if (editForm) {
+    editForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!titleInput || !statusSelect || !editSubmit) return;
+
+      const purchaseValue = purchaseInput?.value?.trim() || "";
+      const startValue = startInput?.value?.trim() || "";
+      const finishValue = finishInput?.value?.trim() || "";
+      const thoughtsValue = thoughtsInput?.value?.trim() || "";
+
+      const payload = {
+        title: titleInput.value.trim(),
+        status: statusSelect.value,
+        purchase_date: purchaseValue || null,
+        start_date: startValue || null,
+        finish_date: finishValue || null,
+        thoughts: thoughtsValue || null,
+      };
+
+      if (!payload.title) {
+        if (editMessage) editMessage.textContent = "Title is required.";
+        titleInput.focus();
+        return;
+      }
+
+      if (payload.status === "wishlist") {
+        payload.purchase_date = null;
+      } else if (!payload.purchase_date) {
+        if (editMessage) {
+          editMessage.textContent = "Purchase date is required for backlog entries.";
+        }
+        purchaseInput?.focus();
+        return;
+      }
+
+      editSubmit.disabled = true;
+      if (editCancel) editCancel.disabled = true;
+      if (editMessage) editMessage.textContent = "Saving changes...";
+
+      try {
+        await fetchJSON(`/api/games/${gameId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (editMessage) editMessage.textContent = "Game updated. Refreshing...";
+        setTimeout(() => {
+          window.location.reload();
+        }, 600);
+      } catch (error) {
+        if (editMessage) {
+          editMessage.textContent = error instanceof Error ? error.message : String(error);
+        }
+        editSubmit.disabled = false;
+        if (editCancel) editCancel.disabled = false;
+      }
+    });
+  }
+
+  updatePurchaseRequirement();
+
+  const sessionForm = document.getElementById("game-session-form");
+  const sessionMessage = document.getElementById("game-session-message");
+  const sessionDateInput = document.getElementById("game-session-date");
+  const sessionPlaytimeInput = document.getElementById("game-session-playtime");
+  const sessionSubmit = sessionForm?.querySelector('button[type="submit"]');
+
+  if (sessionDateInput) {
+    applyDefaultDateIfEmpty(sessionDateInput);
+  }
+
+  if (sessionForm) {
+    sessionForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!sessionSubmit) return;
+
+      const formData = new FormData(sessionForm);
+      const payload = {
+        game_id: gameId,
+        game_title: String(formData.get("game_title") || "").trim() || (titleInput?.value.trim() || ""),
+        session_date: String(formData.get("session_date") || "").trim(),
+        playtime_minutes: Number(formData.get("playtime_minutes") || 0),
+        sentiment: String(formData.get("sentiment") || "").trim(),
+        comment: String(formData.get("comment") || "").trim() || null,
+      };
+
+      if (!payload.session_date) {
+        if (sessionMessage) sessionMessage.textContent = "Session date is required.";
+        sessionDateInput?.focus();
+        return;
+      }
+
+      if (!Number.isFinite(payload.playtime_minutes) || payload.playtime_minutes <= 0) {
+        if (sessionMessage) sessionMessage.textContent = "Enter playtime in minutes.";
+        sessionPlaytimeInput?.focus();
+        return;
+      }
+
+      if (!payload.sentiment) {
+        if (sessionMessage) sessionMessage.textContent = "Select how the session felt.";
+        return;
+      }
+
+      sessionSubmit.disabled = true;
+      if (sessionMessage) sessionMessage.textContent = "Logging session...";
+
+      try {
+        await fetchJSON("/api/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (sessionMessage) sessionMessage.textContent = "Session logged. Refreshing...";
+        setTimeout(() => {
+          window.location.reload();
+        }, 600);
+      } catch (error) {
+        if (sessionMessage) {
+          sessionMessage.textContent = error instanceof Error ? error.message : String(error);
+        }
+        sessionSubmit.disabled = false;
+      }
+    });
+  }
+}
+
 async function initLibraryPage() {
   const backlogList = document.getElementById("backlog-list");
   const wishlistList = document.getElementById("wishlist-list");
@@ -1336,6 +1562,7 @@ async function bootstrap() {
     initBacklogImportPage(),
     initWishlistCsvImportPage(),
     initAddGamePage(),
+    initGameDetailPage(),
     initLibraryPage(),
     initRankingsPage(),
     initSessionsPage(),
