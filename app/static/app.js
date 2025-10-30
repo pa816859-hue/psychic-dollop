@@ -2603,13 +2603,59 @@ async function initLibraryPage() {
     return;
   }
 
-  async function renderLists() {
-    const games = await fetchAndCacheGames({ force: true });
+  const searchInput = document.getElementById("library-search");
+  const searchClear = document.getElementById("library-search-clear");
+  const searchFeedback = document.getElementById("library-search-feedback");
+
+  function updateClearButton(query) {
+    if (!searchClear) return;
+    searchClear.hidden = query.length === 0;
+  }
+
+  function matchesQuery(game, query) {
+    if (!query) return true;
+    const tokens = [
+      game.title,
+      Array.isArray(game.genres) ? game.genres.join(" ") : "",
+      game.short_description || "",
+      game.thoughts || "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return tokens.includes(query);
+  }
+
+  async function renderLists({ force = false } = {}) {
+    const games = await fetchAndCacheGames({ force });
+    const rawQuery = (searchInput?.value || "").trim();
+    const query = rawQuery.toLowerCase();
+    updateClearButton(rawQuery);
+
+    const filteredGames = query
+      ? games.filter((game) => matchesQuery(game, query))
+      : games;
+
+    if (searchFeedback) {
+      if (query) {
+        const total = filteredGames.length;
+        const noun = total === 1 ? "game" : "games";
+        searchFeedback.hidden = false;
+        searchFeedback.textContent =
+          total === 0
+            ? `No games match “${rawQuery}”.`
+            : `Showing ${total.toLocaleString()} ${noun} matching “${rawQuery}”.`;
+      } else {
+        searchFeedback.hidden = true;
+        searchFeedback.textContent = "";
+      }
+    }
+
     const byEloDesc = (a, b) =>
       (Number(b.elo_rating) || 0) - (Number(a.elo_rating) || 0);
 
     const grouped = Object.create(null);
-    games.forEach((game) => {
+    filteredGames.forEach((game) => {
       const normalizedStatus = getStatusDefinition(game.status)?.value || DEFAULT_STATUS;
       if (!grouped[normalizedStatus]) {
         grouped[normalizedStatus] = [];
@@ -2626,22 +2672,38 @@ async function initLibraryPage() {
       if (entries.length === 0) {
         const empty = document.createElement("li");
         empty.className = "empty-state";
-        empty.textContent = definition.emptyCopy;
+        empty.textContent = query
+          ? `No matches in ${definition.label}.`
+          : definition.emptyCopy;
         listElement.appendChild(empty);
         return;
       }
 
       entries.forEach((game) => {
         const card = createGameCard(game, {
-          onDelete: renderLists,
-          onUpdate: renderLists,
+          onDelete: () => renderLists({ force: true }),
+          onUpdate: () => renderLists({ force: true }),
         });
         listElement.appendChild(card);
       });
     });
   }
 
-  await renderLists();
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      renderLists();
+    });
+  }
+
+  if (searchClear && searchInput) {
+    searchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      searchInput.focus();
+      renderLists();
+    });
+  }
+
+  await renderLists({ force: true });
 }
 
 async function initRankingsPage() {
@@ -2721,9 +2783,23 @@ async function initRankingsPage() {
         content.appendChild(genres);
       }
 
+      if (game.thoughts) {
+        const thoughts = document.createElement("div");
+        thoughts.className = "pair-card__thoughts";
+        const label = document.createElement("span");
+        label.className = "pair-card__meta-label";
+        label.textContent = "Thoughts";
+        const body = document.createElement("p");
+        body.textContent = game.thoughts;
+        thoughts.appendChild(label);
+        thoughts.appendChild(body);
+        content.appendChild(thoughts);
+      }
+
       const description = document.createElement("p");
       description.className = "pair-card__description";
-      description.textContent = game.short_description || "No description available yet.";
+      const descriptionCopy = (game.short_description || "").trim();
+      description.textContent = descriptionCopy || "No description available yet.";
       content.appendChild(description);
 
       const actions = document.createElement("div");
