@@ -550,6 +550,8 @@ def _resolve_period_window(session_date: date, period: str) -> _PeriodWindow:
         start = date.fromisocalendar(iso_year, iso_week, 1)
         end = start + timedelta(days=6)
         return _PeriodWindow(start=start, end=end)
+    if period == "day":
+        return _PeriodWindow(start=session_date, end=session_date)
     raise ValueError(f"Unsupported period: {period}")
 
 
@@ -559,6 +561,8 @@ def _format_period_label(window: _PeriodWindow, period: str) -> str:
     if period == "week":
         week_number = window.start.isocalendar()[1]
         return f"Week {week_number} · {window.start.strftime('%b %d')}"
+    if period == "day":
+        return window.start.strftime("%b %d")
     return window.start.isoformat()
 
 
@@ -611,8 +615,8 @@ def summarize_engagement_trend(
     end_date: date | None = None,
 ) -> Dict[str, Any]:
     period = (period or "month").lower()
-    if period not in {"month", "week"}:
-        raise ValueError("Period must be 'month' or 'week'")
+    if period not in {"month", "week", "day"}:
+        raise ValueError("Period must be 'month', 'week', or 'day'")
 
     query = SessionLog.query
     if start_date:
