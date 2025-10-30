@@ -18,8 +18,9 @@ from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
-from .insights import summarize_genre_preferences
+from .insights import build_genre_interest_sentiment, summarize_genre_preferences
 from .models import Comparison, Game, SessionLog
+from .metrics import compute_weighted_sentiment
 
 bp = Blueprint("core", __name__)
 
@@ -87,12 +88,6 @@ def insights_page():
     return render_template("insights.html", page_id="insights")
 
 
-@bp.route("/api/insights/genres")
-def insights_genre_summary():
-    summary = summarize_genre_preferences()
-    return jsonify(summary)
-
-
 @bp.route("/games/<int:game_id>")
 def game_detail_page(game_id: int):
     game = Game.query.get_or_404(game_id)
@@ -104,18 +99,9 @@ def game_detail_page(game_id: int):
         .all()
     )
 
-    total_minutes = sum(session.playtime_minutes for session in sessions)
-    sentiment_weights = {"good": 100.0, "mediocre": 50.0, "bad": 0.0}
-    weighted_sum = sum(
-        sentiment_weights.get(session.sentiment, 50.0) * session.playtime_minutes
-        for session in sessions
-    )
-    total_weight = sum(
-        session.playtime_minutes
-        for session in sessions
-        if session.sentiment in sentiment_weights
-    )
-    weighted_score = weighted_sum / total_weight if total_weight else None
+    weighted_result = compute_weighted_sentiment(sessions)
+    weighted_score = weighted_result.weighted_score
+    total_minutes = weighted_result.total_minutes
     score_color = _score_to_color(weighted_score)
     score_percent = (
         max(0.0, min(100.0, weighted_score)) if weighted_score is not None else 0.0
@@ -138,6 +124,18 @@ def game_detail_page(game_id: int):
 @bp.route("/settings")
 def settings_page():
     return render_template("settings.html", page_id="settings")
+
+
+@bp.route("/api/insights/genres")
+def insights_genre_summary():
+    summary = summarize_genre_preferences()
+    return jsonify(summary)
+
+
+@bp.route("/api/insights/genre-sentiment")
+def insights_genre_sentiment():
+    summary = build_genre_interest_sentiment()
+    return jsonify(summary)
 
 
 @bp.route("/import/backlog")

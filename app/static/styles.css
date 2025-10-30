@@ -154,6 +154,129 @@ body.steam-surface {
   text-align: center;
 }
 
+.genre-sentiment__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.genre-sentiment__item {
+  background: var(--bg-panel);
+  border: 1px solid rgba(26, 59, 92, 0.6);
+  border-radius: var(--radius);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.28);
+  padding: 1.2rem 1.4rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.genre-sentiment__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.genre-sentiment__header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.genre-sentiment__meta {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.genre-sentiment__bars {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.genre-sentiment__bar {
+  position: relative;
+  background: rgba(10, 21, 33, 0.7);
+  border: 1px solid rgba(26, 59, 92, 0.45);
+  border-radius: 999px;
+  height: 28px;
+  overflow: hidden;
+}
+
+.genre-sentiment__fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--fill-width, 0%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 0.85rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #021424;
+  transition: width 0.4s ease;
+}
+
+.genre-sentiment__fill--interest {
+  background: linear-gradient(120deg, #23c3ff, #1a9fff);
+}
+
+.genre-sentiment__fill--enjoyment {
+  background: linear-gradient(120deg, #5cffba, #23ff9e);
+}
+
+.genre-sentiment__fill.is-empty {
+  position: static;
+  width: 100%;
+  justify-content: flex-start;
+  background: transparent;
+  color: var(--text-muted);
+  padding-left: 0.35rem;
+}
+
+.genre-sentiment__gap {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.genre-sentiment__gap--warning {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.genre-sentiment__gap--positive {
+  color: #5cffba;
+  font-weight: 600;
+}
+
+.genre-sentiment__status {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.genre-sentiment__status span {
+  background: rgba(26, 59, 92, 0.35);
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+}
+
+.genre-sentiment__empty {
+  border: 1px dashed rgba(26, 59, 92, 0.5);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  padding: 1rem;
+  text-align: center;
+}
+
 .hidden {
   display: none !important;
 }

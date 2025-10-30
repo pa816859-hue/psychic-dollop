@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Dict, Iterable
 
-from .models import Game
+from sqlalchemy import or_
+
+from . import db
+from .metrics import compute_weighted_sentiment
+from .models import Game, SessionLog
 
 
 _SUPPORTED_STATUSES = ("backlog", "wishlist")
@@ -156,3 +161,141 @@ def _determine_dominant_list(backlog_weight: float, wishlist_weight: float) -> s
     if abs(delta) <= tolerance:
         return "balanced"
     return "backlog" if delta > 0 else "wishlist"
+
+
+def summarize_genre_sentiment() -> Dict[str, Any]:
+    """Aggregate weighted sentiment scores per genre from play sessions."""
+
+    query = (
+        db.session.query(SessionLog, Game)
+        .outerjoin(
+            Game,
+            or_(
+                SessionLog.game_id == Game.id,
+                SessionLog.game_title == Game.title,
+            ),
+        )
+        .all()
+    )
+
+    genre_samples: dict[str, list[SimpleNamespace]] = defaultdict(list)
+    genre_status_samples: dict[str, dict[str, list[SimpleNamespace]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    genre_playtime: dict[str, float] = defaultdict(float)
+    genre_status_playtime: dict[str, dict[str, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
+    genre_session_counts: dict[str, int] = defaultdict(int)
+
+    for session, game in query:
+        if not game:
+            continue
+        genres = _normalize_genres(getattr(game, "genres", None))
+        if not genres:
+            continue
+
+        try:
+            minutes = float(session.playtime_minutes or 0)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        if minutes <= 0:
+            continue
+
+        share = minutes / len(genres)
+        sentiment = str(session.sentiment or "").lower()
+        status = str(getattr(game, "status", "")).lower()
+
+        for genre in genres:
+            genre_samples[genre].append(
+                SimpleNamespace(sentiment=sentiment, playtime_minutes=share)
+            )
+            genre_playtime[genre] += share
+            genre_session_counts[genre] += 1
+
+            if status in _SUPPORTED_STATUSES:
+                genre_status_samples[genre][status].append(
+                    SimpleNamespace(sentiment=sentiment, playtime_minutes=share)
+                )
+                genre_status_playtime[genre][status] += share
+
+    genres_summary = []
+    for genre, samples in genre_samples.items():
+        result = compute_weighted_sentiment(samples)
+        status_summary: dict[str, Any] = {}
+        for status, status_samples in genre_status_samples.get(genre, {}).items():
+            status_result = compute_weighted_sentiment(status_samples)
+            status_summary[status] = {
+                "weighted_sentiment": status_result.weighted_score,
+                "total_playtime_minutes": genre_status_playtime[genre][status],
+                "session_count": len(status_samples),
+            }
+
+        genres_summary.append(
+            {
+                "genre": genre,
+                "weighted_sentiment": result.weighted_score,
+                "total_playtime_minutes": genre_playtime[genre],
+                "session_count": genre_session_counts[genre],
+                "statuses": status_summary,
+            }
+        )
+
+    genres_summary.sort(
+        key=lambda entry: entry["total_playtime_minutes"],
+        reverse=True,
+    )
+
+    return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "genres": genres_summary,
+    }
+
+
+def build_genre_interest_sentiment() -> Dict[str, Any]:
+    """Combine ELO interest with weighted sentiment enjoyment by genre."""
+
+    preference_summary = summarize_genre_preferences()
+    sentiment_summary = summarize_genre_sentiment()
+    preference_lookup = {
+        entry["genre"]: entry for entry in preference_summary.get("genres", [])
+    }
+
+    genres_payload = []
+    for entry in sentiment_summary.get("genres", []):
+        genre = entry["genre"]
+        preference_entry = preference_lookup.get(genre, {})
+        total_interest = preference_entry.get("total", {})
+        average_elo = total_interest.get("average_elo")
+        interest_score = (average_elo / 20.0) if average_elo is not None else None
+
+        status_interest: dict[str, Any] = {}
+        for status in _SUPPORTED_STATUSES:
+            status_metrics = preference_entry.get(status, {})
+            status_interest[status] = {
+                "average_elo": status_metrics.get("average_elo"),
+                "share": status_metrics.get("share"),
+                "count": status_metrics.get("count"),
+            }
+
+        genres_payload.append(
+            {
+                "genre": genre,
+                "interest": {
+                    "average_elo": average_elo,
+                    "interest_score": interest_score,
+                    "statuses": status_interest,
+                },
+                "sentiment": entry,
+            }
+        )
+
+    genres_payload.sort(
+        key=lambda item: item["sentiment"].get("total_playtime_minutes", 0.0),
+        reverse=True,
+    )
+
+    return {
+        "generated_at": sentiment_summary.get("generated_at"),
+        "genres": genres_payload,
+    }
