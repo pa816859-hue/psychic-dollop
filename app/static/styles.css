@@ -23,6 +23,229 @@ body.steam-surface {
   color: var(--text);
 }
 
+.insights {
+  display: grid;
+  gap: 2.5rem;
+  margin: 0 auto;
+  max-width: 1200px;
+  padding: 2.5rem 1.5rem 3rem;
+}
+
+.insights__header {
+  display: grid;
+  gap: 0.75rem;
+  text-align: center;
+}
+
+.insights__header h1 {
+  margin: 0;
+  font-size: 2.25rem;
+}
+
+.insights__header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.insights__cards {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.insights-card {
+  background: var(--bg-panel);
+  border: 1px solid rgba(26, 59, 92, 0.6);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 0.5rem;
+  padding: 1.4rem 1.6rem;
+}
+
+.insights-card h2,
+.insights-card h3 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.insights-card__value {
+  font-size: 2rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--accent);
+}
+
+.insights-card__meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.insights-card--compact {
+  padding: 1.1rem 1.3rem;
+}
+
+.insights-card--compact .insights-card__value {
+  font-size: 1.5rem;
+}
+
+.insights__charts {
+  display: grid;
+  gap: 1.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.insights-chart {
+  background: var(--bg-panel);
+  border: 1px solid rgba(26, 59, 92, 0.6);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 1rem;
+  padding: 1.6rem;
+}
+
+.insights-chart header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.insights-chart header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.insights-chart header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.insights-chart__canvas {
+  min-height: 160px;
+}
+
+.insights__lifecycle header {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.insights__lifecycle header h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.insights__lifecycle header p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.insights__cards--lifecycle {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.insights__tables {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 960px) {
+  .insights__tables {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.insights-table {
+  background: var(--bg-panel);
+  border: 1px solid rgba(26, 59, 92, 0.6);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+  display: grid;
+  gap: 1rem;
+  padding: 1.5rem 1.6rem;
+}
+
+.insights-table header {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.insights-table header h3 {
+  margin: 0;
+}
+
+.insights-table header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.insights-table__content {
+  overflow-x: auto;
+}
+
+.insights-table__grid {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: 100%;
+}
+
+.insights-table__grid th,
+.insights-table__grid td {
+  border-bottom: 1px solid rgba(26, 59, 92, 0.4);
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.insights-table__grid thead th {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.insights-table__grid tbody tr:last-child th,
+.insights-table__grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.insights-table__empty,
+.insights-table__error {
+  border-radius: var(--radius);
+  border: 1px dashed rgba(26, 59, 92, 0.5);
+  margin: 0;
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.insights-table__error {
+  border-style: solid;
+  border-color: rgba(255, 59, 92, 0.4);
+  color: #ffc1cf;
+  background: rgba(255, 59, 92, 0.12);
+}
+
+.insights__notes {
+  background: rgba(15, 30, 46, 0.45);
+  border: 1px solid rgba(26, 59, 92, 0.5);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.8rem;
+}
+
+.insights__notes h2 {
+  margin-top: 0;
+}
+
+.insights__notes p {
+  margin-bottom: 0;
+  color: var(--text-muted);
+}
+
 .genre-insights__controls {
   display: flex;
   flex-wrap: wrap;

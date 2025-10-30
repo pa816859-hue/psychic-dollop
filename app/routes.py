@@ -18,7 +18,11 @@ from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
-from .insights import build_genre_interest_sentiment, summarize_genre_preferences
+from .insights import (
+    build_genre_interest_sentiment,
+    summarize_genre_preferences,
+    summarize_lifecycle_metrics,
+)
 from .models import Comparison, Game, SessionLog
 from .metrics import compute_weighted_sentiment
 
@@ -135,6 +139,12 @@ def insights_genre_summary():
 @bp.route("/api/insights/genre-sentiment")
 def insights_genre_sentiment():
     summary = build_genre_interest_sentiment()
+    return jsonify(summary)
+
+
+@bp.route("/api/insights/lifecycle")
+def insights_lifecycle_metrics():
+    summary = summarize_lifecycle_metrics()
     return jsonify(summary)
 
 

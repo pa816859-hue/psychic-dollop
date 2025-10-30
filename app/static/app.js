@@ -30,6 +30,36 @@ function formatDateForDisplay(value) {
   }
 }
 
+function updateMetricValue(element, value) {
+  if (!element) return;
+  if (value !== null && value !== undefined) {
+    element.textContent = value;
+    return;
+  }
+  const placeholder = element.dataset?.placeholderText;
+  element.textContent = placeholder || "—";
+}
+
+function formatDays(value, { decimals = null } = {}) {
+  if (!Number.isFinite(value)) return "—";
+  let resolvedDecimals = decimals;
+  if (resolvedDecimals === null) {
+    resolvedDecimals = Math.abs(value) < 10 ? 1 : 0;
+  }
+  const rounded = Number(value.toFixed(resolvedDecimals));
+  const suffix = Math.abs(rounded) === 1 ? "day" : "days";
+  return `${rounded.toLocaleString()} ${suffix}`;
+}
+
+function formatDaysRange(lower, upper) {
+  if (!Number.isFinite(lower) || !Number.isFinite(upper)) {
+    return "—";
+  }
+  const minValue = Number(lower.toFixed(0)).toLocaleString();
+  const maxValue = Number(upper.toFixed(0)).toLocaleString();
+  return `${minValue} – ${maxValue} days`;
+}
+
 async function fetchAndCacheGames({ force = false } = {}) {
   if (!force && state.cachedGames.length > 0) {
     return state.cachedGames;
@@ -607,6 +637,240 @@ function renderGenreSentimentComparison(root, summary) {
   canvas.appendChild(list);
 }
 
+function renderLifecycleSummary(root, summary) {
+  if (!root) return;
+
+  const purchaseToStart = summary?.purchase_to_start ?? {};
+  const startToFinish = summary?.start_to_finish ?? {};
+  const purchaseToFinish = summary?.purchase_to_finish ?? {};
+  const agingBacklog = Array.isArray(summary?.aging_backlog)
+    ? summary.aging_backlog
+    : [];
+
+  const purchaseStats = purchaseToStart.statistics ?? {};
+  const startStats = startToFinish.statistics ?? {};
+  const purchaseFinishStats = purchaseToFinish.statistics ?? {};
+  const purchasePercentiles = purchaseStats.percentiles ?? {};
+  const startPercentiles = startStats.percentiles ?? {};
+
+  const avgToStartValue =
+    (purchaseStats.count ?? 0) > 0 ? formatDays(purchaseStats.mean ?? NaN) : null;
+  const avgToFinishValue =
+    (startStats.count ?? 0) > 0 ? formatDays(startStats.mean ?? NaN) : null;
+  const avgPurchaseToFinishValue =
+    (purchaseFinishStats.count ?? 0) > 0
+      ? formatDays(purchaseFinishStats.mean ?? NaN)
+      : null;
+
+  updateMetricValue(
+    root.querySelector('[data-lifecycle-metric="avg-to-start"] .insights-card__value'),
+    avgToStartValue
+  );
+  updateMetricValue(
+    root.querySelector('[data-lifecycle-metric="avg-to-finish"] .insights-card__value'),
+    avgToFinishValue
+  );
+  updateMetricValue(
+    root.querySelector(
+      '[data-lifecycle-metric="avg-purchase-to-finish"] .insights-card__value'
+    ),
+    avgPurchaseToFinishValue
+  );
+
+  const medianToStart =
+    (purchaseStats.count ?? 0) > 0 ? formatDays(purchaseStats.median ?? NaN, { decimals: 0 }) : null;
+  const p75ToStart = Number.isFinite(purchasePercentiles.p75)
+    ? formatDays(purchasePercentiles.p75, { decimals: 0 })
+    : null;
+  const medianToFinish =
+    (startStats.count ?? 0) > 0 ? formatDays(startStats.median ?? NaN, { decimals: 0 }) : null;
+
+  updateMetricValue(
+    root.querySelector('[data-lifecycle-highlight="median-to-start"] .insights-card__value'),
+    medianToStart
+  );
+  updateMetricValue(
+    root.querySelector('[data-lifecycle-highlight="p75-to-start"] .insights-card__value'),
+    p75ToStart
+  );
+  updateMetricValue(
+    root.querySelector('[data-lifecycle-highlight="median-to-finish"] .insights-card__value'),
+    medianToFinish
+  );
+
+  const durationsContainer = root.querySelector(
+    '[data-lifecycle-table="durations"] .insights-table__content'
+  );
+  if (durationsContainer) {
+    durationsContainer.innerHTML = "";
+
+    const stages = [
+      {
+        key: "purchase_to_start",
+        label: "Purchase → Start",
+        stats: purchaseStats,
+        percentiles: purchasePercentiles,
+        examples: Array.isArray(purchaseToStart.longest_examples)
+          ? purchaseToStart.longest_examples
+          : [],
+      },
+      {
+        key: "start_to_finish",
+        label: "Start → Finish",
+        stats: startStats,
+        percentiles: startPercentiles,
+        examples: Array.isArray(startToFinish.longest_examples)
+          ? startToFinish.longest_examples
+          : [],
+      },
+      {
+        key: "purchase_to_finish",
+        label: "Purchase → Finish",
+        stats: purchaseFinishStats,
+        percentiles: purchaseFinishStats.percentiles ?? {},
+        examples: Array.isArray(purchaseToFinish.longest_examples)
+          ? purchaseToFinish.longest_examples
+          : [],
+      },
+    ];
+
+    const hasSamples = stages.some((stage) => (stage.stats?.count ?? 0) > 0);
+    if (!hasSamples) {
+      const empty = document.createElement("p");
+      empty.className = "insights-table__empty";
+      empty.textContent = "Lifecycle metrics will appear once games have timeline data.";
+      durationsContainer.appendChild(empty);
+    } else {
+      const table = document.createElement("table");
+      table.className = "insights-table__grid";
+
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      [
+        "Stage",
+        "Median",
+        "Typical range (25–75%)",
+        "90th percentile",
+        "Longest observed",
+        "Samples",
+      ].forEach((heading) => {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = heading;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      stages.forEach((stage) => {
+        const count = stage.stats?.count ?? 0;
+        const percentiles = stage.percentiles ?? {};
+        const row = document.createElement("tr");
+
+        const stageCell = document.createElement("th");
+        stageCell.scope = "row";
+        stageCell.textContent = stage.label;
+        row.appendChild(stageCell);
+
+        const medianCell = document.createElement("td");
+        medianCell.textContent =
+          count > 0 ? formatDays(stage.stats?.median ?? NaN, { decimals: 0 }) : "—";
+        row.appendChild(medianCell);
+
+        const rangeCell = document.createElement("td");
+        rangeCell.textContent =
+          count > 0 ? formatDaysRange(percentiles.p25, percentiles.p75) : "—";
+        row.appendChild(rangeCell);
+
+        const p90Cell = document.createElement("td");
+        p90Cell.textContent = Number.isFinite(percentiles.p90)
+          ? formatDays(percentiles.p90, { decimals: 0 })
+          : "—";
+        row.appendChild(p90Cell);
+
+        const longestCell = document.createElement("td");
+        const longestExample = Array.isArray(stage.examples) ? stage.examples[0] : null;
+        if (longestExample && Number.isFinite(longestExample.days)) {
+          longestCell.textContent = `${formatDays(longestExample.days, {
+            decimals: 0,
+          })} • ${longestExample.title}`;
+        } else {
+          longestCell.textContent = "—";
+        }
+        row.appendChild(longestCell);
+
+        const samplesCell = document.createElement("td");
+        samplesCell.textContent = count.toLocaleString();
+        row.appendChild(samplesCell);
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      durationsContainer.appendChild(table);
+    }
+  }
+
+  const backlogContainer = root.querySelector(
+    '[data-lifecycle-table="aging-backlog"] .insights-table__content'
+  );
+  if (backlogContainer) {
+    backlogContainer.innerHTML = "";
+
+    if (agingBacklog.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "insights-table__empty";
+      empty.textContent = "No backlog entries are currently waiting on a start date.";
+      backlogContainer.appendChild(empty);
+    } else {
+      const table = document.createElement("table");
+      table.className = "insights-table__grid";
+
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      ["Title", "Days waiting", "Purchased", "Added to backlog"].forEach((heading) => {
+        const th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = heading;
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      agingBacklog.forEach((entry) => {
+        const row = document.createElement("tr");
+
+        const titleCell = document.createElement("th");
+        titleCell.scope = "row";
+        titleCell.textContent = entry.title || "Untitled";
+        row.appendChild(titleCell);
+
+        const daysCell = document.createElement("td");
+        const waitValue = Number.isFinite(entry.days_waiting)
+          ? Math.max(entry.days_waiting, 0)
+          : entry.days_waiting;
+        daysCell.textContent = formatDays(waitValue, { decimals: 0 });
+        row.appendChild(daysCell);
+
+        const purchaseCell = document.createElement("td");
+        purchaseCell.textContent = formatDateForDisplay(entry.purchase_date);
+        row.appendChild(purchaseCell);
+
+        const addedCell = document.createElement("td");
+        addedCell.textContent = formatDateForDisplay(entry.added_date);
+        row.appendChild(addedCell);
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      backlogContainer.appendChild(table);
+    }
+  }
+}
+
 async function initInsightsPage() {
   const root = document.querySelector("[data-insights-root]");
   if (!root) return;
@@ -621,9 +885,10 @@ async function initInsightsPage() {
   root.dataset.state = "loading";
 
   try {
-    const [summary, sentimentSummary] = await Promise.all([
+    const [summary, sentimentSummary, lifecycleSummary] = await Promise.all([
       fetchJSON("/api/insights/genres"),
       fetchJSON("/api/insights/genre-sentiment"),
+      fetchJSON("/api/insights/lifecycle"),
     ]);
 
     const backlogMetric = root.querySelector(
@@ -648,6 +913,7 @@ async function initInsightsPage() {
 
     renderGenreInsights(root, summary);
     renderGenreSentimentComparison(root, sentimentSummary);
+    renderLifecycleSummary(root, lifecycleSummary);
     root.dataset.state = "loaded";
   } catch (error) {
     console.error("Failed to load insight data", error);
@@ -663,6 +929,16 @@ async function initInsightsPage() {
       sentimentChart.innerHTML =
         '<p class="genre-insights__error">Unable to load genre sentiment right now. Please try again later.</p>';
     }
+    const lifecycleSections = root.querySelectorAll(
+      '[data-lifecycle-table] .insights-table__content'
+    );
+    lifecycleSections.forEach((section) => {
+      const errorMessage = document.createElement("p");
+      errorMessage.className = "insights-table__error";
+      errorMessage.textContent = "Unable to load lifecycle analytics right now.";
+      section.innerHTML = "";
+      section.appendChild(errorMessage);
+    });
     root.dataset.state = "error";
   }
 }
