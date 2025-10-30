@@ -264,6 +264,21 @@ async function initWishlistCsvImportPage() {
   });
 }
 
+async function initInsightsPage() {
+  const root = document.querySelector("[data-insights-root]");
+  if (!root) return;
+
+  const placeholders = root.querySelectorAll("[data-placeholder-text]");
+  placeholders.forEach((element) => {
+    if (!element.textContent.trim()) {
+      element.textContent = element.dataset.placeholderText;
+    }
+  });
+
+  root.dataset.state = "initialized";
+  // Future insights data fetching and rendering will be handled here.
+}
+
 function createGameCard(game, { onDelete, onUpdate } = {}) {
   const li = document.createElement("li");
   li.className = "game-card";
@@ -1566,6 +1581,7 @@ async function bootstrap() {
     initLibraryPage(),
     initRankingsPage(),
     initSessionsPage(),
+    initInsightsPage(),
     initSettingsPage(),
   ]);
 }
