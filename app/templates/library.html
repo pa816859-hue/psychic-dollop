@@ -8,6 +8,28 @@
       <h2>Your library</h2>
       <p>Browse and manage every stage of your library, from wishlist to full clears.</p>
     </div>
+    <div class="library-controls">
+      <div class="field library-search">
+        <label for="library-search">Search library</label>
+        <div class="library-search__input">
+          <input
+            type="search"
+            id="library-search"
+            name="library-search"
+            placeholder="Search by title, genre, or notes"
+            autocomplete="off"
+          />
+          <button type="button" id="library-search-clear" class="secondary" hidden>Clear</button>
+        </div>
+      </div>
+      <p
+        class="hint library-search__feedback"
+        id="library-search-feedback"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></p>
+    </div>
     <div class="library-sections">
       <section class="library-section" data-library-status="backlog">
         <h3>Backlog</h3>
