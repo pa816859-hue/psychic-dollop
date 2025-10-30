@@ -21,6 +21,7 @@ class Game(db.Model):
     purchase_date = db.Column(db.Date, nullable=True)
     start_date = db.Column(db.Date, nullable=True)
     finish_date = db.Column(db.Date, nullable=True)
+    thoughts = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def to_dict(self) -> dict:
@@ -41,6 +42,7 @@ class Game(db.Model):
             "finish_date": self.finish_date.isoformat()
             if self.finish_date
             else None,
+            "thoughts": self.thoughts,
             "created_at": self.created_at.isoformat(),
         }
 
