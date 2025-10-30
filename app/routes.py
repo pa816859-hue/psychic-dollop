@@ -81,6 +81,11 @@ def sessions_page():
     return render_template("sessions.html", page_id="sessions")
 
 
+@bp.route("/insights")
+def insights_page():
+    return render_template("insights.html", page_id="insights")
+
+
 @bp.route("/games/<int:game_id>")
 def game_detail_page(game_id: int):
     game = Game.query.get_or_404(game_id)

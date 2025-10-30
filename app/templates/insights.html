@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Insights · Game Backlog Companion{% endblock %}
+
+{% block content %}
+<section class="insights" data-insights-root>
+  <header class="insights__header">
+    <h1>Insights Dashboard</h1>
+    <p>Explore backlog trends, activity streaks, and upcoming priorities at a glance.</p>
+  </header>
+
+  <section class="insights__cards" aria-label="Key metrics">
+    <article class="insights-card" data-insights-metric="backlog" data-placeholder-text="Backlog total will appear here">
+      <h2>Total Backlog</h2>
+      <p class="insights-card__value" data-placeholder-text="0 games">0 games</p>
+      <p class="insights-card__meta">Track how many titles remain unbeaten.</p>
+    </article>
+
+    <article class="insights-card" data-insights-metric="wishlist" data-placeholder-text="Wishlist total will appear here">
+      <h2>Wishlist Size</h2>
+      <p class="insights-card__value" data-placeholder-text="0 titles">0 titles</p>
+      <p class="insights-card__meta">Monitor the games you are considering picking up next.</p>
+    </article>
+
+    <article class="insights-card" data-insights-metric="playtime" data-placeholder-text="Recent playtime will appear here">
+      <h2>Recent Playtime</h2>
+      <p class="insights-card__value" data-placeholder-text="0 hours">0 hours</p>
+      <p class="insights-card__meta">Surface your latest sessions and engagement streaks.</p>
+    </article>
+  </section>
+
+  <section class="insights__charts" aria-label="Trend visualizations">
+    <div class="insights-chart" data-insights-chart="completion" data-placeholder-text="Completion trends chart will render here">
+      <header>
+        <h2>Completion Velocity</h2>
+        <p>Visualize how frequently backlog entries are being finished.</p>
+      </header>
+      <div class="insights-chart__canvas" role="img" aria-label="Completion trends pending" data-placeholder-text="Awaiting data"></div>
+    </div>
+
+    <div class="insights-chart" data-insights-chart="genre" data-placeholder-text="Genre distribution chart will render here">
+      <header>
+        <h2>Genre Mix</h2>
+        <p>Understand the balance of genres in your current backlog.</p>
+      </header>
+      <div class="insights-chart__canvas" role="img" aria-label="Genre distribution pending" data-placeholder-text="Awaiting data"></div>
+    </div>
+  </section>
+
+  <section class="insights__notes" aria-label="Next actions">
+    <h2>Next Actions</h2>
+    <p data-placeholder-text="Actionable recommendations will appear here when insights are available.">
+      Recommendations will appear here once insights data is connected.
+    </p>
+  </section>
+</section>
+{% endblock %}
