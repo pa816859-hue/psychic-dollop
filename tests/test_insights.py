@@ -3,8 +3,12 @@ from datetime import date, datetime
 import pytest
 
 from app import db
-from app.insights import summarize_genre_preferences, summarize_lifecycle_metrics
-from app.models import Game
+from app.insights import (
+    summarize_engagement_trend,
+    summarize_genre_preferences,
+    summarize_lifecycle_metrics,
+)
+from app.models import Game, SessionLog
 
 
 def test_summarize_genre_preferences_weights_multi_genre_games(app_instance):
@@ -124,3 +128,74 @@ def test_summarize_lifecycle_metrics(app_instance):
     assert aging_backlog[0]["title"] == "Lagoon Archive"
     assert aging_backlog[0]["days_waiting"] == 75
     assert aging_backlog[0]["added_date"] == "2022-11-01"
+
+
+def test_summarize_engagement_trend_detects_spikes(app_instance):
+    with app_instance.app_context():
+        game_a = Game(title="Aurora Trails", status="playing")
+        game_a.genres = ["RPG", "Adventure"]
+        game_b = Game(title="Nebula Forge", status="playing")
+        game_b.genres = ["Strategy"]
+        db.session.add_all([game_a, game_b])
+        db.session.commit()
+
+        sessions = [
+            SessionLog(
+                game_id=game_a.id,
+                game_title=game_a.title,
+                session_date=date(2023, 1, 5),
+                playtime_minutes=120,
+                sentiment="good",
+            ),
+            SessionLog(
+                game_id=game_b.id,
+                game_title=game_b.title,
+                session_date=date(2023, 1, 18),
+                playtime_minutes=60,
+                sentiment="mediocre",
+            ),
+            SessionLog(
+                game_id=game_a.id,
+                game_title=game_a.title,
+                session_date=date(2023, 2, 10),
+                playtime_minutes=200,
+                sentiment="good",
+            ),
+            SessionLog(
+                game_id=game_b.id,
+                game_title=game_b.title,
+                session_date=date(2023, 2, 12),
+                playtime_minutes=200,
+                sentiment="bad",
+            ),
+            SessionLog(
+                game_id=game_b.id,
+                game_title=game_b.title,
+                session_date=date(2023, 3, 3),
+                playtime_minutes=60,
+                sentiment="mediocre",
+            ),
+        ]
+        db.session.add_all(sessions)
+        db.session.commit()
+
+        summary = summarize_engagement_trend()
+        filtered = summarize_engagement_trend(start_date=date(2023, 2, 1))
+
+    assert len(summary["timeline"]) == 3
+    january, february, march = summary["timeline"]
+    assert january["active_titles"] == 2
+    assert january["total_minutes"] == pytest.approx(180.0)
+    assert february["total_minutes"] == pytest.approx(400.0)
+    assert february["average_sentiment"] == pytest.approx(50.0)
+    assert march["total_minutes"] == pytest.approx(60.0)
+
+    assert filtered["timeline"][0]["period_start"].startswith("2023-02")
+
+    callout_types = {callout["type"] for callout in summary["callouts"]}
+    assert "spike" in callout_types
+    assert "dip" in callout_types
+
+    spike_callout = next(callout for callout in summary["callouts"] if callout["type"] == "spike")
+    spike_titles = {driver["title"] for driver in spike_callout["drivers"]["titles"]}
+    assert {"Aurora Trails", "Nebula Forge"}.issubset(spike_titles)

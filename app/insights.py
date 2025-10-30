@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from math import ceil, floor
 from statistics import fmean, median
 from types import SimpleNamespace
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, List
 
 from sqlalchemy import or_
 
@@ -459,3 +461,333 @@ def summarize_lifecycle_metrics(*, today: date | None = None, backlog_limit: int
         "purchase_to_finish": _summarize(purchase_to_finish_samples),
         "aging_backlog": backlog_waiting[: max(0, int(backlog_limit))],
     }
+
+
+@dataclass(frozen=True)
+class _PeriodWindow:
+    start: date
+    end: date
+
+
+def _resolve_period_window(session_date: date, period: str) -> _PeriodWindow:
+    if period == "month":
+        start = session_date.replace(day=1)
+        last_day = calendar.monthrange(session_date.year, session_date.month)[1]
+        end = session_date.replace(day=last_day)
+        return _PeriodWindow(start=start, end=end)
+    if period == "week":
+        iso_year, iso_week, _ = session_date.isocalendar()
+        start = date.fromisocalendar(iso_year, iso_week, 1)
+        end = start + timedelta(days=6)
+        return _PeriodWindow(start=start, end=end)
+    raise ValueError(f"Unsupported period: {period}")
+
+
+def _format_period_label(window: _PeriodWindow, period: str) -> str:
+    if period == "month":
+        return window.start.strftime("%b %Y")
+    if period == "week":
+        week_number = window.start.isocalendar()[1]
+        return f"Week {week_number} · {window.start.strftime('%b %d')}"
+    return window.start.isoformat()
+
+
+def _collect_game_lookup(
+    game_ids: Iterable[int | None],
+    game_titles: Iterable[str | None],
+) -> tuple[dict[int, Game], dict[str, Game]]:
+    ids = {identifier for identifier in game_ids if identifier}
+    titles = {str(title).strip() for title in game_titles if title}
+
+    filters = []
+    if ids:
+        filters.append(Game.id.in_(ids))
+    if titles:
+        filters.append(Game.title.in_(titles))
+
+    if not filters:
+        return {}, {}
+
+    if len(filters) == 1:
+        games = Game.query.filter(filters[0]).all()
+    else:
+        games = Game.query.filter(or_(*filters)).all()
+
+    by_id = {game.id: game for game in games if game.id is not None}
+    by_title = {game.title.lower(): game for game in games if game.title}
+    return by_id, by_title
+
+
+def _resolve_game_for_session(
+    session: SessionLog,
+    *,
+    games_by_id: dict[int, Game],
+    games_by_title: dict[str, Game],
+) -> Game | None:
+    if session.game_id and session.game_id in games_by_id:
+        return games_by_id[session.game_id]
+
+    title = (session.game_title or "").strip().lower()
+    if title and title in games_by_title:
+        return games_by_title[title]
+
+    return None
+
+
+def summarize_engagement_trend(
+    *,
+    period: str = "month",
+    start_date: date | None = None,
+    end_date: date | None = None,
+) -> Dict[str, Any]:
+    period = (period or "month").lower()
+    if period not in {"month", "week"}:
+        raise ValueError("Period must be 'month' or 'week'")
+
+    query = SessionLog.query
+    if start_date:
+        query = query.filter(SessionLog.session_date >= start_date)
+    if end_date:
+        query = query.filter(SessionLog.session_date <= end_date)
+
+    sessions: List[SessionLog] = query.order_by(SessionLog.session_date.asc()).all()
+    games_by_id, games_by_title = _collect_game_lookup(
+        (session.game_id for session in sessions),
+        (session.game_title for session in sessions),
+    )
+
+    timeline_map: dict[date, dict[str, Any]] = {}
+
+    for session in sessions:
+        session_day = getattr(session, "session_date", None)
+        if not isinstance(session_day, date):
+            continue
+
+        try:
+            minutes = float(getattr(session, "playtime_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            minutes = 0.0
+        if minutes <= 0:
+            continue
+
+        window = _resolve_period_window(session_day, period)
+        entry = timeline_map.setdefault(
+            window.start,
+            {
+                "window": window,
+                "sessions": [],
+                "total_minutes": 0.0,
+                "titles": defaultdict(float),
+                "title_meta": {},
+                "genres": defaultdict(float),
+                "titles_set": set(),
+            },
+        )
+
+        entry["sessions"].append(session)
+        entry["total_minutes"] += minutes
+
+        resolved_game = _resolve_game_for_session(
+            session, games_by_id=games_by_id, games_by_title=games_by_title
+        )
+        raw_title = (
+            getattr(resolved_game, "title", None)
+            or getattr(session, "game_title", None)
+            or "Unknown Title"
+        )
+        display_title = str(raw_title).strip() or "Unknown Title"
+        resolved_game_id = getattr(resolved_game, "id", None) or getattr(
+            session, "game_id", None
+        )
+        title_key = (resolved_game_id, display_title.lower())
+        entry["titles"][title_key] += minutes
+        entry["titles_set"].add(title_key)
+        entry["title_meta"].setdefault(
+            title_key,
+            {
+                "title": display_title,
+                "game_id": resolved_game_id,
+            },
+        )
+
+        genres = _normalize_genres(getattr(resolved_game, "genres", None))
+        if genres:
+            share = minutes / len(genres)
+            for genre in genres:
+                entry["genres"][genre] += share
+
+    timeline: List[Dict[str, Any]] = []
+    for start_key in sorted(timeline_map.keys()):
+        bucket = timeline_map[start_key]
+        window = bucket["window"]
+        total_minutes = bucket["total_minutes"]
+        sessions_for_period = bucket["sessions"]
+        sentiment_result = compute_weighted_sentiment(sessions_for_period)
+
+        sorted_titles = sorted(
+            (
+                {
+                    "minutes": minutes,
+                    "share": (minutes / total_minutes) if total_minutes else 0.0,
+                    "game_id": bucket["title_meta"][title_key]["game_id"],
+                    "title": bucket["title_meta"][title_key]["title"],
+                }
+                for title_key, minutes in bucket["titles"].items()
+            ),
+            key=lambda entry: entry["minutes"],
+            reverse=True,
+        )
+
+        top_titles: List[Dict[str, Any]] = []
+        other_minutes = 0.0
+        for index, record in enumerate(sorted_titles):
+            if index < 3:
+                top_titles.append(record)
+            else:
+                other_minutes += record["minutes"]
+        if other_minutes > 0:
+            top_titles.append(
+                {
+                    "title": "Other Titles",
+                    "minutes": other_minutes,
+                    "share": (other_minutes / total_minutes) if total_minutes else 0.0,
+                    "game_id": None,
+                }
+            )
+
+        sorted_genres = sorted(
+            (
+                {
+                    "genre": genre,
+                    "minutes": minutes,
+                    "share": (minutes / total_minutes) if total_minutes else 0.0,
+                }
+                for genre, minutes in bucket["genres"].items()
+            ),
+            key=lambda entry: entry["minutes"],
+            reverse=True,
+        )[:5]
+
+        timeline.append(
+            {
+                "period_start": window.start.isoformat(),
+                "period_end": window.end.isoformat(),
+                "label": _format_period_label(window, period),
+                "total_minutes": total_minutes,
+                "average_sentiment": sentiment_result.weighted_score,
+                "sentiment_minutes": sentiment_result.weighted_minutes,
+                "active_titles": len(bucket["titles_set"]),
+                "top_titles": top_titles,
+                "top_genres": sorted_genres,
+            }
+        )
+
+    callouts: List[Dict[str, Any]] = []
+    for index in range(1, len(timeline)):
+        current = timeline[index]
+        previous = timeline[index - 1]
+        current_minutes = current["total_minutes"]
+        previous_minutes = previous["total_minutes"]
+        if current_minutes <= 0 and previous_minutes <= 0:
+            continue
+
+        change_minutes = current_minutes - previous_minutes
+        percent_change = None
+        if previous_minutes > 0:
+            percent_change = change_minutes / previous_minutes
+
+        if current_minutes >= previous_minutes * 1.5 and change_minutes >= 120:
+            percent_label = (
+                f"{percent_change:.0%}" if percent_change is not None else "significantly"
+            )
+            callouts.append(
+                {
+                    "type": "spike",
+                    "period_start": current["period_start"],
+                    "label": f"Playtime surged {percent_label} vs prior {period}",
+                    "change_minutes": change_minutes,
+                    "percent_change": percent_change,
+                    "drivers": {
+                        "titles": [
+                            driver
+                            for driver in current["top_titles"]
+                            if driver["title"] != "Other Titles"
+                        ],
+                        "genres": current["top_genres"][:3],
+                    },
+                }
+            )
+            continue
+
+        if (
+            previous_minutes > 0
+            and current_minutes <= previous_minutes * 0.6
+            and change_minutes <= -120
+        ):
+            percent_label = (
+                f"{abs(percent_change):.0%}" if percent_change is not None else "sharply"
+            )
+            callouts.append(
+                {
+                    "type": "dip",
+                    "period_start": current["period_start"],
+                    "label": f"Engagement dipped {percent_label} vs prior {period}",
+                    "change_minutes": change_minutes,
+                    "percent_change": percent_change,
+                    "drivers": {
+                        "titles": [
+                            driver
+                            for driver in previous["top_titles"]
+                            if driver["title"] != "Other Titles"
+                        ],
+                        "genres": previous["top_genres"][:3],
+                    },
+                }
+            )
+
+    for period_entry in timeline:
+        total_minutes = period_entry["total_minutes"]
+        sentiment_score = period_entry["average_sentiment"] or 0.0
+        if total_minutes >= 240 and sentiment_score <= 45:
+            callouts.append(
+                {
+                    "type": "burnout",
+                    "period_start": period_entry["period_start"],
+                    "label": "High playtime but low sentiment—consider rotating titles.",
+                    "change_minutes": None,
+                    "percent_change": None,
+                    "drivers": {
+                        "titles": [
+                            driver
+                            for driver in period_entry["top_titles"]
+                            if driver["title"] != "Other Titles"
+                        ],
+                        "genres": period_entry["top_genres"][:3],
+                    },
+                }
+            )
+
+    response: Dict[str, Any] = {
+        "period": period,
+        "timeline": timeline,
+        "callouts": callouts,
+    }
+
+    if sessions:
+        valid_dates = [
+            session.session_date
+            for session in sessions
+            if isinstance(session.session_date, date)
+        ]
+        if valid_dates:
+            response["range"] = {
+                "start": min(valid_dates).isoformat(),
+                "end": max(valid_dates).isoformat(),
+            }
+
+    if start_date:
+        response.setdefault("range", {})["requested_start"] = start_date.isoformat()
+    if end_date:
+        response.setdefault("range", {})["requested_end"] = end_date.isoformat()
+
+    return response
