@@ -12,9 +12,18 @@ from sqlalchemy import or_
 from . import db
 from .metrics import compute_weighted_sentiment
 from .models import Game, SessionLog
+from .statuses import INSIGHT_BUCKET_BY_STATUS
 
 
-_SUPPORTED_STATUSES = ("backlog", "wishlist")
+_BUCKET_DISPLAY_ORDER = ("backlog", "wishlist")
+_INSIGHT_BUCKET_SET = set(INSIGHT_BUCKET_BY_STATUS.values())
+_INSIGHT_BUCKETS = tuple(
+    bucket for bucket in _BUCKET_DISPLAY_ORDER if bucket in _INSIGHT_BUCKET_SET
+)
+if len(_INSIGHT_BUCKETS) < len(_INSIGHT_BUCKET_SET):
+    _INSIGHT_BUCKETS = _INSIGHT_BUCKETS + tuple(
+        sorted(_INSIGHT_BUCKET_SET - set(_INSIGHT_BUCKETS))
+    )
 
 
 def _normalize_genres(genres: Iterable[str] | None) -> list[str]:
@@ -39,32 +48,35 @@ def summarize_genre_preferences() -> Dict[str, Any]:
     lists separately along with a combined rollup.
     """
 
-    status_genre_totals: dict[str, dict[str, dict[str, float]]] = {
-        status: defaultdict(lambda: {"count": 0, "weight": 0.0, "elo_sum": 0.0})
-        for status in _SUPPORTED_STATUSES
+    def _metric_factory() -> dict[str, float]:
+        return {"count": 0, "weight": 0.0, "elo_sum": 0.0}
+
+    bucket_genre_totals: dict[str, dict[str, dict[str, float]]] = {
+        bucket: defaultdict(_metric_factory) for bucket in _INSIGHT_BUCKETS
     }
-    status_game_counts: dict[str, int] = {status: 0 for status in _SUPPORTED_STATUSES}
+    bucket_game_counts: dict[str, int] = {bucket: 0 for bucket in _INSIGHT_BUCKETS}
 
     games: Iterable[Game] = Game.query.all()
     for game in games:
         status = (game.status or "").lower()
-        if status not in status_genre_totals:
+        bucket = INSIGHT_BUCKET_BY_STATUS.get(status)
+        if bucket not in bucket_genre_totals:
             continue
 
-        status_game_counts[status] += 1
+        bucket_game_counts[bucket] += 1
         genres = _normalize_genres(game.genres)
         if not genres:
             continue
 
         weight_per_genre = 1.0 / len(genres)
         for genre in genres:
-            entry = status_genre_totals[status][genre]
+            entry = bucket_genre_totals[bucket][genre]
             entry["count"] += 1
             entry["weight"] += weight_per_genre
             entry["elo_sum"] += weight_per_genre * float(game.elo_rating or 0.0)
 
     status_summaries: dict[str, dict[str, Any]] = {}
-    for status, genre_totals in status_genre_totals.items():
+    for bucket, genre_totals in bucket_genre_totals.items():
         total_weight = sum(metric["weight"] for metric in genre_totals.values())
         total_count = sum(metric["count"] for metric in genre_totals.values())
         genres_summary = []
@@ -82,8 +94,8 @@ def summarize_genre_preferences() -> Dict[str, Any]:
             )
 
         genres_summary.sort(key=lambda item: (item["weight"], item["count"]), reverse=True)
-        status_summaries[status] = {
-            "total_games": status_game_counts.get(status, 0),
+        status_summaries[bucket] = {
+            "total_games": bucket_game_counts.get(bucket, 0),
             "total_weight": total_weight,
             "total_count": total_count,
             "genres": genres_summary,
@@ -92,16 +104,16 @@ def summarize_genre_preferences() -> Dict[str, Any]:
     combined_weight = sum(summary["total_weight"] for summary in status_summaries.values())
     combined_genres = []
     all_genres = set()
-    for totals in status_genre_totals.values():
+    for totals in bucket_genre_totals.values():
         all_genres.update(totals.keys())
 
     def _format_entry(
-        status: str, genre: str, totals: dict[str, dict[str, float]]
+        bucket: str, genre: str, totals: dict[str, dict[str, float]]
     ) -> dict[str, Any]:
         metrics = totals.get(genre, {"count": 0, "weight": 0.0, "elo_sum": 0.0})
         weight = metrics["weight"]
         average_elo = metrics["elo_sum"] / weight if weight else None
-        status_total_weight = status_summaries.get(status, {}).get("total_weight", 0.0)
+        status_total_weight = status_summaries.get(bucket, {}).get("total_weight", 0.0)
         return {
             "count": metrics["count"],
             "weight": weight,
@@ -111,8 +123,16 @@ def summarize_genre_preferences() -> Dict[str, Any]:
         }
 
     for genre in sorted(all_genres):
-        backlog_entry = _format_entry("backlog", genre, status_genre_totals["backlog"])
-        wishlist_entry = _format_entry("wishlist", genre, status_genre_totals["wishlist"])
+        backlog_entry = _format_entry(
+            "backlog",
+            genre,
+            bucket_genre_totals.get("backlog", defaultdict(_metric_factory)),
+        )
+        wishlist_entry = _format_entry(
+            "wishlist",
+            genre,
+            bucket_genre_totals.get("wishlist", defaultdict(_metric_factory)),
+        )
 
         total_weight = backlog_entry["weight"] + wishlist_entry["weight"]
         total_count = backlog_entry["count"] + wishlist_entry["count"]
@@ -207,6 +227,7 @@ def summarize_genre_sentiment() -> Dict[str, Any]:
         share = minutes / len(genres)
         sentiment = str(session.sentiment or "").lower()
         status = str(getattr(game, "status", "")).lower()
+        bucket = INSIGHT_BUCKET_BY_STATUS.get(status)
 
         for genre in genres:
             genre_samples[genre].append(
@@ -215,11 +236,11 @@ def summarize_genre_sentiment() -> Dict[str, Any]:
             genre_playtime[genre] += share
             genre_session_counts[genre] += 1
 
-            if status in _SUPPORTED_STATUSES:
-                genre_status_samples[genre][status].append(
+            if bucket in _INSIGHT_BUCKETS:
+                genre_status_samples[genre][bucket].append(
                     SimpleNamespace(sentiment=sentiment, playtime_minutes=share)
                 )
-                genre_status_playtime[genre][status] += share
+                genre_status_playtime[genre][bucket] += share
 
     genres_summary = []
     for genre, samples in genre_samples.items():
@@ -272,9 +293,9 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
         interest_score = (average_elo / 20.0) if average_elo is not None else None
 
         status_interest: dict[str, Any] = {}
-        for status in _SUPPORTED_STATUSES:
-            status_metrics = preference_entry.get(status, {})
-            status_interest[status] = {
+        for bucket in _INSIGHT_BUCKETS:
+            status_metrics = preference_entry.get(bucket, {})
+            status_interest[bucket] = {
                 "average_elo": status_metrics.get("average_elo"),
                 "share": status_metrics.get("share"),
                 "count": status_metrics.get("count"),

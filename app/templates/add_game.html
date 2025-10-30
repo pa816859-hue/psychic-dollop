@@ -17,13 +17,18 @@
         <label for="status">List</label>
         <select id="status" name="status">
           <option value="backlog">Backlog</option>
+          <option value="playing">Playing</option>
+          <option value="occasional">Occasional</option>
+          <option value="story_clear">Story clear</option>
+          <option value="full_clear">Full clear</option>
+          <option value="dropped">Dropped</option>
           <option value="wishlist">Wishlist</option>
         </select>
       </div>
       <div class="field" data-purchase-group>
         <label for="purchase-date">Purchase date</label>
         <input id="purchase-date" name="purchase_date" type="date" required />
-        <p class="hint">Required for backlog entries.</p>
+        <p class="hint">Required once you've purchased the game.</p>
       </div>
       <div class="field">
         <label for="start-date">Started playing</label>
@@ -35,7 +40,7 @@
       </div>
       <div class="field">
         <label for="thoughts">Thoughts (optional)</label>
-        <textarea id="thoughts" name="thoughts" rows="3" placeholder="Notes, vibes, why it's on the wishlist..."></textarea>
+        <textarea id="thoughts" name="thoughts" rows="3" placeholder="Notes, vibes, why it's on your radar..."></textarea>
       </div>
       <div class="field">
         <label for="steam-app-id">Steam App ID (optional)</label>

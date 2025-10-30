@@ -27,11 +27,16 @@
           <span class="game-edit-label">List</span>
           <select id="game-edit-status" name="status">
             <option value="backlog" {% if game.status == 'backlog' %}selected{% endif %}>Backlog</option>
+            <option value="playing" {% if game.status == 'playing' %}selected{% endif %}>Playing</option>
+            <option value="occasional" {% if game.status == 'occasional' %}selected{% endif %}>Occasional</option>
+            <option value="story_clear" {% if game.status == 'story_clear' %}selected{% endif %}>Story clear</option>
+            <option value="full_clear" {% if game.status == 'full_clear' %}selected{% endif %}>Full clear</option>
+            <option value="dropped" {% if game.status == 'dropped' %}selected{% endif %}>Dropped</option>
             <option value="wishlist" {% if game.status == 'wishlist' %}selected{% endif %}>Wishlist</option>
           </select>
         </label>
         <label
-          class="game-edit-field{% if game.status != 'backlog' %} is-optional{% endif %}"
+          class="game-edit-field{% if game.status == 'wishlist' %} is-optional{% endif %}"
           for="game-edit-purchase-date"
           id="game-edit-purchase-field"
         >
@@ -41,9 +46,9 @@
             name="purchase_date"
             type="date"
             value="{{ game.purchase_date.isoformat() if game.purchase_date }}"
-            {% if game.status == 'backlog' %}required{% endif %}
+            {% if game.status != 'wishlist' %}required{% endif %}
           />
-          <small class="game-edit-hint">Required for backlog entries.</small>
+          <small class="game-edit-hint">Required once you've purchased the game.</small>
         </label>
         <label class="game-edit-field" for="game-edit-start-date">
           <span class="game-edit-label">Started</span>
