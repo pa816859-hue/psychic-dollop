@@ -3,11 +3,82 @@
 {% block title %}{{ game.title }} · Deck Commander{% endblock %}
 
 {% block content %}
-  <section class="panel game-detail" id="game-detail">
+  <section
+    class="panel game-detail"
+    id="game-detail"
+    data-game-id="{{ game.id }}"
+    data-game-title="{{ game.title }}"
+  >
     <div class="panel-heading">
       <h2>{{ game.title }}</h2>
       <p>{{ game.short_description or "Track your progress and see how each session adds up." }}</p>
     </div>
+    <div class="game-detail-actions">
+      <button type="button" id="game-edit-toggle">Edit details</button>
+      <button type="button" id="game-delete-button">Delete game</button>
+    </div>
+    <form id="game-edit-form" class="game-edit-form hidden" novalidate>
+      <div class="game-edit-grid">
+        <label class="game-edit-field" for="game-edit-title">
+          <span class="game-edit-label">Title</span>
+          <input id="game-edit-title" name="title" type="text" value="{{ game.title }}" required />
+        </label>
+        <label class="game-edit-field" for="game-edit-status">
+          <span class="game-edit-label">List</span>
+          <select id="game-edit-status" name="status">
+            <option value="backlog" {% if game.status == 'backlog' %}selected{% endif %}>Backlog</option>
+            <option value="wishlist" {% if game.status == 'wishlist' %}selected{% endif %}>Wishlist</option>
+          </select>
+        </label>
+        <label
+          class="game-edit-field{% if game.status != 'backlog' %} is-optional{% endif %}"
+          for="game-edit-purchase-date"
+          id="game-edit-purchase-field"
+        >
+          <span class="game-edit-label">Purchase date</span>
+          <input
+            id="game-edit-purchase-date"
+            name="purchase_date"
+            type="date"
+            value="{{ game.purchase_date.isoformat() if game.purchase_date }}"
+            {% if game.status == 'backlog' %}required{% endif %}
+          />
+          <small class="game-edit-hint">Required for backlog entries.</small>
+        </label>
+        <label class="game-edit-field" for="game-edit-start-date">
+          <span class="game-edit-label">Started</span>
+          <input
+            id="game-edit-start-date"
+            name="start_date"
+            type="date"
+            value="{{ game.start_date.isoformat() if game.start_date }}"
+          />
+        </label>
+        <label class="game-edit-field" for="game-edit-finish-date">
+          <span class="game-edit-label">Finished</span>
+          <input
+            id="game-edit-finish-date"
+            name="finish_date"
+            type="date"
+            value="{{ game.finish_date.isoformat() if game.finish_date }}"
+          />
+        </label>
+        <label class="game-edit-field game-edit-field--full" for="game-edit-thoughts">
+          <span class="game-edit-label">Thoughts</span>
+          <textarea
+            id="game-edit-thoughts"
+            name="thoughts"
+            rows="3"
+            placeholder="Notes, vibes, why it's on the list..."
+          >{{- game.thoughts or '' -}}</textarea>
+        </label>
+      </div>
+      <p class="hint game-edit-message" id="game-edit-message"></p>
+      <div class="game-edit-actions">
+        <button type="submit">Save changes</button>
+        <button type="button" class="secondary" id="game-edit-cancel">Cancel</button>
+      </div>
+    </form>
     <div class="game-detail-header">
       {% if game.icon_url %}
         <img src="{{ game.icon_url }}" alt="{{ game.title }} artwork" class="game-detail-art" loading="lazy" />
@@ -75,6 +146,43 @@
         <p class="metric-value">{{ '%.1f'|format(total_hours) }} hours</p>
         <p class="metric-sub">{{ total_minutes }} minutes recorded.</p>
       </div>
+    </div>
+    <div class="game-detail-thoughts">
+      <h3>Thoughts</h3>
+      {% if game.thoughts %}
+        <p>{{ game.thoughts|replace('\n', '<br />')|safe }}</p>
+      {% else %}
+        <p class="empty-state">No personal notes yet. Use the editor above to add your thoughts.</p>
+      {% endif %}
+    </div>
+    <div class="game-detail-session-form">
+      <h3>Log a new session</h3>
+      <form id="game-session-form" novalidate>
+        <input type="hidden" name="game_id" value="{{ game.id }}" />
+        <input type="hidden" name="game_title" value="{{ game.title }}" />
+        <div class="field">
+          <label for="game-session-date">Date</label>
+          <input id="game-session-date" name="session_date" type="date" required />
+        </div>
+        <div class="field">
+          <label for="game-session-playtime">Playtime (minutes)</label>
+          <input id="game-session-playtime" name="playtime_minutes" type="number" min="1" required />
+        </div>
+        <fieldset>
+          <legend>Session quality</legend>
+          <div class="radio-group">
+            <label><input type="radio" name="sentiment" value="good" required /> Good</label>
+            <label><input type="radio" name="sentiment" value="mediocre" /> Mediocre</label>
+            <label><input type="radio" name="sentiment" value="bad" /> Bad</label>
+          </div>
+        </fieldset>
+        <div class="field">
+          <label for="game-session-comment">Comments</label>
+          <textarea id="game-session-comment" name="comment" rows="3"></textarea>
+        </div>
+        <button type="submit">Add session</button>
+        <p class="hint" id="game-session-message"></p>
+      </form>
     </div>
     <div class="game-detail-sessions">
       <h3>Recent sessions</h3>
