@@ -2,6 +2,12 @@ const state = {
   cachedGames: [],
   engagementColorMap: new Map(),
   engagementPaletteIndex: 0,
+  engagementFilters: {
+    period: "month",
+    range: "12m",
+  },
+  engagementRequestId: 0,
+  engagementSummary: null,
   insightBuckets: {
     metadata: {},
     order: [],
@@ -21,6 +27,24 @@ const ENGAGEMENT_PALETTE = [
 ];
 
 const ENGAGEMENT_OTHER_COLOR = "rgba(148, 163, 184, 0.55)";
+
+const ENGAGEMENT_RANGE_PRESETS = {
+  day: [
+    { value: "14d", label: "Last 14 days", unit: "day", amount: 14 },
+    { value: "30d", label: "Last 30 days", unit: "day", amount: 30 },
+    { value: "90d", label: "Last 90 days", unit: "day", amount: 90 },
+  ],
+  week: [
+    { value: "8w", label: "Last 8 weeks", unit: "week", amount: 8 },
+    { value: "26w", label: "Last 26 weeks", unit: "week", amount: 26 },
+    { value: "52w", label: "Last 52 weeks", unit: "week", amount: 52 },
+  ],
+  month: [
+    { value: "6m", label: "Last 6 months", unit: "month", amount: 6 },
+    { value: "12m", label: "Last 12 months", unit: "month", amount: 12 },
+    { value: "24m", label: "Last 24 months", unit: "month", amount: 24 },
+  ],
+};
 
 const STATUS_TAXONOMY = [
   {
@@ -508,6 +532,60 @@ function formatSentimentValue(value) {
   return `${Math.round(value)} pts`;
 }
 
+function getEngagementRangePresets(period) {
+  const key = String(period || "month").toLowerCase();
+  return ENGAGEMENT_RANGE_PRESETS[key] || [];
+}
+
+function resolveEngagementRangePreset(period, value) {
+  return getEngagementRangePresets(period).find((preset) => preset.value === value) || null;
+}
+
+function startOfUtcDay(date = new Date()) {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  );
+}
+
+function computeStartDateFromPreset(preset) {
+  if (!preset) return null;
+  const today = startOfUtcDay();
+  if (preset.unit === "day") {
+    const shift = Math.max(0, Number(preset.amount || 0) - 1);
+    today.setUTCDate(today.getUTCDate() - shift);
+    return today.toISOString().slice(0, 10);
+  }
+  if (preset.unit === "week") {
+    const startOfWeek = new Date(today);
+    const weekday = startOfWeek.getUTCDay() || 7;
+    startOfWeek.setUTCDate(startOfWeek.getUTCDate() - (weekday - 1));
+    const shift = Math.max(0, Number(preset.amount || 0) - 1) * 7;
+    startOfWeek.setUTCDate(startOfWeek.getUTCDate() - shift);
+    return startOfWeek.toISOString().slice(0, 10);
+  }
+  if (preset.unit === "month") {
+    const monthStart = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)
+    );
+    const shift = Math.max(0, Number(preset.amount || 0) - 1);
+    monthStart.setUTCMonth(monthStart.getUTCMonth() - shift);
+    return monthStart.toISOString().slice(0, 10);
+  }
+  return today.toISOString().slice(0, 10);
+}
+
+function computeEngagementLabelStep(period, count) {
+  if (!Number.isFinite(count) || count <= 0) return 1;
+  const normalized = String(period || "month").toLowerCase();
+  let target = 12;
+  if (normalized === "day") {
+    target = 10;
+  } else if (normalized === "week") {
+    target = 14;
+  }
+  return Math.max(1, Math.ceil(count / target));
+}
+
 function renderEngagementTrend(root, summary) {
   const chart = root.querySelector('[data-insights-chart="engagement"]');
   if (!chart) return;
@@ -525,6 +603,7 @@ function renderEngagementTrend(root, summary) {
     return;
   }
 
+  const period = String(summary?.period || "month").toLowerCase();
   const minutesValues = timeline.map((entry) => Number(entry.total_minutes) || 0);
   const maxMinutes = Math.max(...minutesValues);
   if (!Number.isFinite(maxMinutes) || maxMinutes <= 0) {
@@ -580,8 +659,9 @@ function renderEngagementTrend(root, summary) {
   }
 
   const slotWidth = chartWidth / timeline.length;
-  const barWidth = Math.max(18, Math.min(52, slotWidth * 0.55));
+  const barWidth = Math.max(12, Math.min(52, slotWidth * 0.6));
   const sentimentPoints = [];
+  const labelStep = computeEngagementLabelStep(period, timeline.length);
 
   timeline.forEach((entry, index) => {
     const totalMinutes = Number(entry.total_minutes) || 0;
@@ -633,7 +713,14 @@ function renderEngagementTrend(root, summary) {
     label.setAttribute("y", height - padding.bottom + 20);
     label.setAttribute("text-anchor", "middle");
     label.setAttribute("class", "engagement-chart__axis engagement-chart__axis--x");
-    label.textContent = entry.label || `Period ${index + 1}`;
+    const labelText = entry.label || `Period ${index + 1}`;
+    const shouldShowLabel =
+      labelStep <= 1 || index % labelStep === 0 || index === timeline.length - 1;
+    label.textContent = shouldShowLabel ? labelText : "";
+    if (!shouldShowLabel) {
+      label.setAttribute("aria-hidden", "true");
+      label.dataset.fullLabel = labelText;
+    }
     svg.appendChild(label);
   });
 
@@ -697,6 +784,168 @@ function renderEngagementTrend(root, summary) {
       });
 
     canvas.appendChild(legend);
+  }
+}
+
+function populateEngagementRangeSelect(select, period, desiredValue) {
+  if (!select) return desiredValue || null;
+
+  const presets = getEngagementRangePresets(period);
+  select.innerHTML = "";
+
+  if (presets.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "All time";
+    option.selected = true;
+    select.appendChild(option);
+    select.disabled = true;
+    return "";
+  }
+
+  select.disabled = false;
+  const hasDesired = presets.some((preset) => preset.value === desiredValue);
+  const resolvedValue = hasDesired
+    ? desiredValue
+    : presets[0]?.value || "";
+
+  presets.forEach((preset) => {
+    const option = document.createElement("option");
+    option.value = preset.value;
+    option.textContent = preset.label;
+    option.selected = preset.value === resolvedValue;
+    select.appendChild(option);
+  });
+
+  if (resolvedValue) {
+    select.value = resolvedValue;
+  }
+
+  return resolvedValue;
+}
+
+async function loadEngagementSummary(root, { propagateError = false } = {}) {
+  const chart = root.querySelector('[data-insights-chart="engagement"]');
+  const canvas = chart?.querySelector(".insights-chart__canvas");
+  const calloutContainer = root.querySelector('[data-insights-callouts]');
+
+  const requestId = (state.engagementRequestId || 0) + 1;
+  state.engagementRequestId = requestId;
+
+  if (canvas) {
+    canvas.dataset.state = "loading";
+    canvas.innerHTML =
+      '<p class="engagement-chart__empty">Loading timeline…</p>';
+  }
+
+  if (calloutContainer) {
+    calloutContainer.dataset.state = "loading";
+    calloutContainer.innerHTML =
+      '<p class="insights-callouts__loading">Loading highlights…</p>';
+  }
+
+  const { period = "month", range } = state.engagementFilters;
+  const preset = resolveEngagementRangePreset(period, range);
+  const startDate = computeStartDateFromPreset(preset);
+  const params = new URLSearchParams();
+  params.set("period", period);
+  if (startDate) {
+    params.set("start", startDate);
+  }
+
+  try {
+    const summary = await fetchJSON(
+      `/api/insights/engagement-trend?${params.toString()}`
+    );
+
+    if (state.engagementRequestId !== requestId) {
+      return summary;
+    }
+
+    state.engagementSummary = summary;
+    state.engagementColorMap = new Map();
+    state.engagementPaletteIndex = 0;
+
+    renderEngagementTrend(root, summary);
+    renderEngagementCallouts(root, summary);
+
+    const playtimeMetric = root.querySelector(
+      '[data-insights-metric="playtime"] .insights-card__value'
+    );
+    if (playtimeMetric) {
+      const entries = Array.isArray(summary?.timeline) ? summary.timeline : [];
+      if (entries.length > 0) {
+        const latest = entries[entries.length - 1];
+        const label = `${formatPlaytimeMinutes(
+          latest.total_minutes || 0
+        )} · mood ${formatSentimentValue(latest.average_sentiment)}`;
+        updateMetricValue(playtimeMetric, label);
+      } else {
+        updateMetricValue(playtimeMetric, null);
+      }
+    }
+
+    return summary;
+  } catch (error) {
+    const isLatest = state.engagementRequestId === requestId;
+    if (isLatest) {
+      if (canvas) {
+        canvas.innerHTML =
+          '<p class="engagement-chart__error">Unable to load engagement trend right now.</p>';
+        canvas.dataset.state = "error";
+      }
+      if (calloutContainer) {
+        calloutContainer.innerHTML =
+          '<p class="insights-callouts__error">Unable to load engagement highlights right now.</p>';
+        calloutContainer.dataset.state = "error";
+      }
+      console.error("Failed to load engagement trend", error);
+    }
+    if (propagateError && isLatest) {
+      throw error;
+    }
+    return null;
+  }
+}
+
+function initializeEngagementControls(root) {
+  const periodSelect = root.querySelector('[data-engagement-filter="period"]');
+  const rangeSelect = root.querySelector('[data-engagement-filter="range"]');
+
+  if (periodSelect) {
+    const selectedPeriod = periodSelect.value || state.engagementFilters.period;
+    periodSelect.value = selectedPeriod;
+    state.engagementFilters.period = selectedPeriod;
+  }
+
+  if (rangeSelect) {
+    const resolvedRange = populateEngagementRangeSelect(
+      rangeSelect,
+      state.engagementFilters.period,
+      state.engagementFilters.range
+    );
+    state.engagementFilters.range = resolvedRange;
+  }
+
+  if (periodSelect) {
+    periodSelect.addEventListener("change", () => {
+      const nextPeriod = periodSelect.value || "month";
+      state.engagementFilters.period = nextPeriod;
+      const updatedRange = populateEngagementRangeSelect(
+        rangeSelect,
+        nextPeriod,
+        state.engagementFilters.range
+      );
+      state.engagementFilters.range = updatedRange;
+      loadEngagementSummary(root);
+    });
+  }
+
+  if (rangeSelect) {
+    rangeSelect.addEventListener("change", () => {
+      state.engagementFilters.range = rangeSelect.value;
+      loadEngagementSummary(root);
+    });
   }
 }
 
@@ -1672,14 +1921,14 @@ async function initInsightsPage() {
 
   root.dataset.state = "loading";
 
+  initializeEngagementControls(root);
+
   try {
-    const [summary, sentimentSummary, lifecycleSummary, engagementSummary] =
-      await Promise.all([
-        fetchJSON("/api/insights/genres"),
-        fetchJSON("/api/insights/genre-sentiment"),
-        fetchJSON("/api/insights/lifecycle"),
-        fetchJSON("/api/insights/engagement-trend"),
-      ]);
+    const [summary, sentimentSummary, lifecycleSummary] = await Promise.all([
+      fetchJSON("/api/insights/genres"),
+      fetchJSON("/api/insights/genre-sentiment"),
+      fetchJSON("/api/insights/lifecycle"),
+    ]);
 
     state.insightBuckets = {
       metadata: summary?.bucket_metadata || {},
@@ -1711,21 +1960,11 @@ async function initInsightsPage() {
       }`;
     }
 
-    const playtimeMetric = root.querySelector(
-      '[data-insights-metric="playtime"] .insights-card__value'
-    );
-    if (playtimeMetric && engagementSummary?.timeline?.length) {
-      const latest = engagementSummary.timeline[engagementSummary.timeline.length - 1];
-      playtimeMetric.textContent = `${formatPlaytimeMinutes(
-        latest.total_minutes || 0
-      )} · mood ${formatSentimentValue(latest.average_sentiment)}`;
-    }
-
-    renderEngagementTrend(root, engagementSummary);
-    renderEngagementCallouts(root, engagementSummary);
     renderGenreInsights(root, summary);
     renderGenreSentimentComparison(root, sentimentSummary);
     renderLifecycleSummary(root, lifecycleSummary);
+
+    await loadEngagementSummary(root, { propagateError: true });
     root.dataset.state = "loaded";
   } catch (error) {
     console.error("Failed to load insight data", error);
@@ -1735,11 +1974,13 @@ async function initInsightsPage() {
     if (engagementChart) {
       engagementChart.innerHTML =
         '<p class="engagement-chart__error">Unable to load engagement trend right now.</p>';
+      engagementChart.dataset.state = "error";
     }
     const calloutContainer = root.querySelector('[data-insights-callouts]');
     if (calloutContainer) {
       calloutContainer.innerHTML =
         '<p class="insights-callouts__error">Unable to load engagement highlights right now.</p>';
+      calloutContainer.dataset.state = "error";
     }
     const genreChart = root.querySelector('[data-insights-chart="genre"] .insights-chart__canvas');
     if (genreChart) {

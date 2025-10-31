@@ -208,3 +208,48 @@ def test_summarize_engagement_trend_detects_spikes(app_instance):
     spike_callout = next(callout for callout in summary["callouts"] if callout["type"] == "spike")
     spike_titles = {driver["title"] for driver in spike_callout["drivers"]["titles"]}
     assert {"Aurora Trails", "Nebula Forge"}.issubset(spike_titles)
+
+
+def test_summarize_engagement_trend_daily_period(app_instance):
+    with app_instance.app_context():
+        game = Game(title="Signal Drift", status="playing")
+        db.session.add(game)
+        db.session.commit()
+
+        sessions = [
+            SessionLog(
+                game_id=game.id,
+                game_title=game.title,
+                session_date=date(2023, 4, 1),
+                playtime_minutes=90,
+                sentiment="great",
+            ),
+            SessionLog(
+                game_id=game.id,
+                game_title=game.title,
+                session_date=date(2023, 4, 1),
+                playtime_minutes=60,
+                sentiment="good",
+            ),
+            SessionLog(
+                game_id=game.id,
+                game_title=game.title,
+                session_date=date(2023, 4, 3),
+                playtime_minutes=45,
+                sentiment="bad",
+            ),
+        ]
+        db.session.add_all(sessions)
+        db.session.commit()
+
+        summary = summarize_engagement_trend(period="day")
+
+    assert summary["period"] == "day"
+    timeline = summary["timeline"]
+    assert len(timeline) == 2
+    first_day = timeline[0]
+    assert first_day["period_start"] == "2023-04-01"
+    assert first_day["total_minutes"] == pytest.approx(150.0)
+    assert first_day["label"].startswith("Apr")
+    second_day = timeline[1]
+    assert second_day["period_start"] == "2023-04-03"

@@ -48,10 +48,30 @@
   </section>
 
   <section class="insights__charts" aria-label="Trend visualizations">
-    <div class="insights-chart" data-insights-chart="engagement" data-placeholder-text="Engagement timeline will render here">
-      <header>
-        <h2>Engagement Timeline</h2>
-        <p>Contrast total playtime and mood to spot sustained momentum or burnout risk.</p>
+    <div class="insights-chart insights-chart--wide" data-insights-chart="engagement" data-placeholder-text="Engagement timeline will render here">
+      <header class="insights-chart__header">
+        <div class="insights-chart__intro">
+          <h2>Engagement Timeline</h2>
+          <p>Contrast total playtime and mood to spot sustained momentum or burnout risk.</p>
+        </div>
+        <div class="insights-chart__controls" data-engagement-controls>
+          <label class="insights-chart__control">
+            <span>View</span>
+            <select data-engagement-filter="period" aria-label="Select engagement period">
+              <option value="day">Daily</option>
+              <option value="week">Weekly</option>
+              <option value="month" selected>Monthly</option>
+            </select>
+          </label>
+          <label class="insights-chart__control">
+            <span>Range</span>
+            <select data-engagement-filter="range" aria-label="Select engagement range">
+              <option value="6m">Last 6 months</option>
+              <option value="12m" selected>Last 12 months</option>
+              <option value="24m">Last 24 months</option>
+            </select>
+          </label>
+        </div>
       </header>
       <div class="insights-chart__canvas" role="img" aria-label="Engagement timeline pending" data-placeholder-text="Awaiting data"></div>
     </div>
