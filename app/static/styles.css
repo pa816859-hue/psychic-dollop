@@ -999,6 +999,271 @@ button:hover {
   box-shadow: 0 12px 24px rgba(26, 159, 255, 0.25);
 }
 
+.home-hero {
+  align-items: center;
+  margin-bottom: 2.5rem;
+}
+
+.home-dashboard {
+  display: grid;
+  gap: 2rem;
+}
+
+.home-dashboard__primary,
+.home-dashboard__aside {
+  display: grid;
+  gap: 2rem;
+}
+
+@media (min-width: 1100px) {
+  .home-dashboard {
+    grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.glance-metrics {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.glance-card {
+  background: rgba(8, 20, 34, 0.85);
+  border-radius: 16px;
+  border: 1px solid rgba(26, 59, 92, 0.45);
+  padding: 1.2rem 1.4rem;
+  display: grid;
+  gap: 0.45rem;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.35);
+}
+
+.glance-card h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.glance-card__value {
+  margin: 0;
+  font-size: 2.4rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.glance-card__meta {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.recent-games {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1.2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.recent-game {
+  background: rgba(6, 14, 24, 0.85);
+  border-radius: 18px;
+  border: 1px solid rgba(26, 59, 92, 0.45);
+  padding: 1.3rem 1.5rem;
+  display: grid;
+  gap: 0.9rem;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+}
+
+.recent-game__intro h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.recent-game__intro p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+.recent-game__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.recent-game__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(26, 159, 255, 0.12);
+  border: 1px solid rgba(26, 159, 255, 0.35);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.recent-game__status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.recent-game__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 1.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(26, 159, 255, 0.35);
+  background: rgba(26, 159, 255, 0.15);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.link-button:hover,
+.link-button:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 14px 30px rgba(26, 159, 255, 0.35);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.sentiment {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.sentiment--good {
+  background: rgba(52, 211, 153, 0.2);
+}
+
+.sentiment--mediocre {
+  background: rgba(250, 204, 21, 0.18);
+}
+
+.sentiment--bad {
+  background: rgba(248, 113, 113, 0.22);
+}
+
+.activity-list {
+  display: grid;
+  gap: 0.85rem;
+  margin: 0 0 1.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+.activity-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.activity-item dt {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.activity-item dd {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.activity-item dd.is-muted {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.activity-callout {
+  position: relative;
+  z-index: 1;
+  background: rgba(5, 15, 28, 0.85);
+  border-radius: 14px;
+  border: 1px solid rgba(26, 59, 92, 0.4);
+  padding: 1rem 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.activity-callout h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.activity-callout p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.activity-callout__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.shortcut-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1rem;
+}
+
+.shortcut-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.2rem;
+  border-radius: 14px;
+  text-decoration: none;
+  background: rgba(6, 16, 30, 0.85);
+  border: 1px solid rgba(26, 59, 92, 0.4);
+  color: var(--text);
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.shortcut-card:hover,
+.shortcut-card:focus-visible {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 32px rgba(26, 159, 255, 0.25);
+  outline: none;
+}
+
+.shortcut-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.shortcut-meta {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
 button {
   background: linear-gradient(120deg, rgba(26, 159, 255, 0.95), rgba(42, 110, 245, 0.95));
   color: #051426;

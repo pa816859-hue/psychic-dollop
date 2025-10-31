@@ -6,7 +6,7 @@ import logging
 import random
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html import unescape
 from itertools import combinations
 from typing import Iterable, Tuple
@@ -14,7 +14,7 @@ import re
 
 import requests
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import db
@@ -73,7 +73,118 @@ steam_rate_limiter = RateLimiter(0.35)
 
 @bp.route("/")
 def home():
-    return render_template("home.html", page_id="home")
+    status_counts = {
+        status: count
+        for status, count in db.session.query(Game.status, func.count(Game.id)).group_by(Game.status)
+    }
+
+    owned_total = sum(status_counts.get(status, 0) for status in OWNED_STATUSES)
+    backlog_total = status_counts.get("backlog", 0)
+    playing_total = status_counts.get("playing", 0)
+    occasional_total = status_counts.get("occasional", 0)
+    finished_total = status_counts.get("story_clear", 0) + status_counts.get("full_clear", 0)
+    wishlist_total = status_counts.get("wishlist", 0)
+    dropped_total = status_counts.get("dropped", 0)
+
+    total_sessions = SessionLog.query.count()
+
+    library_summary = {
+        "owned_total": owned_total,
+        "backlog_total": backlog_total,
+        "active_total": playing_total + occasional_total,
+        "finished_total": finished_total,
+        "wishlist_total": wishlist_total,
+        "dropped_total": dropped_total,
+        "total_sessions": total_sessions,
+        "completion_percent": round((finished_total / owned_total) * 100) if owned_total else 0,
+    }
+
+    recent_window = date.today() - timedelta(days=14)
+    recent_sessions = (
+        SessionLog.query.order_by(SessionLog.session_date.desc(), SessionLog.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    recent_minutes = 0
+    active_days: set[date] = set()
+    sentiment_counts = {"good": 0, "mediocre": 0, "bad": 0}
+
+    for session in recent_sessions:
+        if session.session_date and session.session_date >= recent_window:
+            recent_minutes += session.playtime_minutes
+            active_days.add(session.session_date)
+            if session.sentiment in sentiment_counts:
+                sentiment_counts[session.sentiment] += 1
+
+    def format_minutes(minutes: int) -> str:
+        hours, remainder = divmod(minutes, 60)
+        if hours and remainder:
+            return f"{hours}h {remainder}m"
+        if hours:
+            return f"{hours}h"
+        return f"{remainder}m"
+
+    last_session = recent_sessions[0] if recent_sessions else None
+
+    missing_titles = {s.game_title for s in recent_sessions if not s.game_id}
+    title_map = {}
+    if missing_titles:
+        title_map = {
+            game.title: game
+            for game in Game.query.filter(Game.title.in_(tuple(missing_titles))).all()
+        }
+
+    recent_games = []
+    seen_keys: set[str | int] = set()
+    for session in recent_sessions:
+        key: str | int = session.game_id or session.game_title.lower()
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        game = session.game or title_map.get(session.game_title)
+        recent_games.append(
+            {
+                "title": session.game_title,
+                "session_date": session.session_date,
+                "playtime_minutes": session.playtime_minutes,
+                "sentiment": session.sentiment,
+                "game": game,
+            }
+        )
+        if len(recent_games) >= 6:
+            break
+
+    sentiment_display = {
+        "good": "Upbeat",
+        "mediocre": "Mixed",
+        "bad": "Rough",
+    }
+
+    dominant_sentiment = None
+    if any(sentiment_counts.values()):
+        dominant_sentiment = max(sentiment_counts.items(), key=lambda item: item[1])[0]
+
+    activity_summary = {
+        "recent_minutes": recent_minutes,
+        "recent_playtime_label": format_minutes(recent_minutes) if recent_minutes else "No playtime yet",
+        "active_days": len(active_days),
+        "sentiment_counts": sentiment_counts,
+        "dominant_sentiment": sentiment_display.get(dominant_sentiment) if dominant_sentiment else None,
+        "last_session": last_session,
+        "last_session_game": (
+            (last_session.game if last_session else None)
+            or (title_map.get(last_session.game_title) if last_session else None)
+        ),
+    }
+
+    return render_template(
+        "home.html",
+        page_id="home",
+        library_summary=library_summary,
+        recent_games=recent_games,
+        activity_summary=activity_summary,
+    )
 
 
 @bp.route("/games/add")

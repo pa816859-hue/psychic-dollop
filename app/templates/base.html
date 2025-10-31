@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}Game Backlog Companion{% endblock %}</title>
+    <title>{% block title %}Gaming Assistant{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
     {% block head_extra %}{% endblock %}
   </head>
   <body class="steam-surface" data-page="{{ page_id|default('') }}">
     <header class="steam-header">
       <nav class="top-bar">
-        <div class="brand"><a href="{{ url_for('core.home') }}">Deck Commander</a></div>
+        <div class="brand"><a href="{{ url_for('core.home') }}">Gaming Assistant</a></div>
         <ul class="nav-links">
           <li><a href="{{ url_for('core.add_game_page') }}">Add Games</a></li>
           <li><a href="{{ url_for('core.backlog_import_page') }}">CSV Import</a></li>
