@@ -108,6 +108,57 @@ const OWNED_STATUS_SET = new Set(
 );
 const DEFAULT_STATUS = "backlog";
 
+const LIBRARY_FILTERS = [
+  {
+    value: "all",
+    label: "All",
+    scope: "library",
+    statuses: STATUS_TAXONOMY.map((entry) => entry.value),
+  },
+  {
+    value: "owned",
+    label: "Owned",
+    scope: "owned collection",
+    statuses: STATUS_TAXONOMY.filter((entry) => entry.requiresPurchaseDate).map(
+      (entry) => entry.value
+    ),
+  },
+  {
+    value: "backlog",
+    label: "Backlog",
+    scope: "backlog",
+    statuses: ["backlog"],
+  },
+  {
+    value: "rotation",
+    label: "In rotation",
+    scope: "rotation",
+    statuses: ["playing", "occasional"],
+  },
+  {
+    value: "completed",
+    label: "Completed",
+    scope: "completed shelf",
+    statuses: ["story_clear", "full_clear"],
+  },
+  {
+    value: "wishlist",
+    label: "Wishlist",
+    scope: "wishlist",
+    statuses: ["wishlist"],
+  },
+  {
+    value: "dropped",
+    label: "Dropped",
+    scope: "dropped pile",
+    statuses: ["dropped"],
+  },
+];
+
+const LIBRARY_FILTER_LOOKUP = new Map(
+  LIBRARY_FILTERS.map((entry) => [entry.value, entry])
+);
+
 function getStatusDefinition(value) {
   return STATUS_LOOKUP[String(value || "").toLowerCase()] || null;
 }
@@ -2832,6 +2883,7 @@ async function initGameDetailPage() {
 }
 
 async function initLibraryPage() {
+  const libraryPanel = document.getElementById("lists");
   const libraryLists = new Map();
   document.querySelectorAll("[data-library-list]").forEach((element) => {
     const status = element.dataset.libraryList;
@@ -2844,9 +2896,43 @@ async function initLibraryPage() {
     return;
   }
 
+  const librarySections = new Map();
+  document.querySelectorAll("[data-library-status]").forEach((section) => {
+    const status = section.dataset.libraryStatus;
+    if (status) {
+      librarySections.set(status, section);
+    }
+  });
+
   const searchInput = document.getElementById("library-search");
   const searchClear = document.getElementById("library-search-clear");
   const searchFeedback = document.getElementById("library-search-feedback");
+  const filterButtons = Array.from(
+    document.querySelectorAll("[data-library-filter]")
+  );
+
+  const initialFilter = (() => {
+    const requested = libraryPanel?.dataset.initialFilter || "all";
+    return LIBRARY_FILTER_LOOKUP.has(requested) ? requested : "all";
+  })();
+
+  let activeFilter = initialFilter;
+
+  function getActiveFilterDefinition() {
+    return (
+      LIBRARY_FILTER_LOOKUP.get(activeFilter) ||
+      LIBRARY_FILTER_LOOKUP.get("all")
+    );
+  }
+
+  function updateFilterButtons() {
+    filterButtons.forEach((button) => {
+      const value = button.dataset.libraryFilter;
+      const isActive = value === activeFilter;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", String(isActive));
+    });
+  }
 
   function updateClearButton(query) {
     if (!searchClear) return;
@@ -2873,19 +2959,29 @@ async function initLibraryPage() {
     const query = rawQuery.toLowerCase();
     updateClearButton(rawQuery);
 
+    const filterDefinition = getActiveFilterDefinition();
+    const statusSet = new Set(filterDefinition.statuses);
+
     const filteredGames = query
       ? games.filter((game) => matchesQuery(game, query))
       : games;
 
+    const filteredByStatus = filteredGames.filter((game) => {
+      const normalizedStatus =
+        getStatusDefinition(game.status)?.value || DEFAULT_STATUS;
+      return statusSet.has(normalizedStatus);
+    });
+
     if (searchFeedback) {
       if (query) {
-        const total = filteredGames.length;
+        const total = filteredByStatus.length;
         const noun = total === 1 ? "game" : "games";
+        const scopeLabel = (filterDefinition.scope || filterDefinition.label).toLowerCase();
         searchFeedback.hidden = false;
         searchFeedback.textContent =
           total === 0
-            ? `No games match “${rawQuery}”.`
-            : `Showing ${total.toLocaleString()} ${noun} matching “${rawQuery}”.`;
+            ? `No titles in your ${scopeLabel} match “${rawQuery}”.`
+            : `Showing ${total.toLocaleString()} ${noun} in your ${scopeLabel} matching “${rawQuery}”.`;
       } else {
         searchFeedback.hidden = true;
         searchFeedback.textContent = "";
@@ -2896,7 +2992,7 @@ async function initLibraryPage() {
       (Number(b.elo_rating) || 0) - (Number(a.elo_rating) || 0);
 
     const grouped = Object.create(null);
-    filteredGames.forEach((game) => {
+    filteredByStatus.forEach((game) => {
       const normalizedStatus = getStatusDefinition(game.status)?.value || DEFAULT_STATUS;
       if (!grouped[normalizedStatus]) {
         grouped[normalizedStatus] = [];
@@ -2906,9 +3002,16 @@ async function initLibraryPage() {
 
     STATUS_TAXONOMY.forEach((definition) => {
       const listElement = libraryLists.get(definition.value);
-      if (!listElement) return;
+      const sectionElement = librarySections.get(definition.value);
+      if (!listElement || !sectionElement) return;
 
+      const shouldShow = statusSet.has(definition.value);
+      sectionElement.hidden = !shouldShow;
       listElement.innerHTML = "";
+      if (!shouldShow) {
+        return;
+      }
+
       const entries = (grouped[definition.value] || []).sort(byEloDesc);
       if (entries.length === 0) {
         const empty = document.createElement("li");
@@ -2943,6 +3046,33 @@ async function initLibraryPage() {
       renderLists();
     });
   }
+
+  filterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const value = button.dataset.libraryFilter;
+      if (!value) return;
+      const next = LIBRARY_FILTER_LOOKUP.has(value) ? value : "all";
+      if (next === activeFilter) return;
+      activeFilter = next;
+      if (libraryPanel) {
+        libraryPanel.dataset.initialFilter = next;
+      }
+      updateFilterButtons();
+      renderLists();
+
+      if (window?.history?.replaceState) {
+        const url = new URL(window.location.href);
+        if (next === "all") {
+          url.searchParams.delete("filter");
+        } else {
+          url.searchParams.set("filter", next);
+        }
+        window.history.replaceState({}, "", url.toString());
+      }
+    });
+  });
+
+  updateFilterButtons();
 
   await renderLists({ force: true });
 }

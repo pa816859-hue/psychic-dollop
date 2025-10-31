@@ -29,33 +29,62 @@
           <p>Everything you need to decide what to play tonight.</p>
         </div>
         <div class="glance-metrics">
-          <article class="glance-card">
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='owned') }}"
+            aria-label="View owned games in your library"
+          >
             <h3>Owned library</h3>
             <p class="glance-card__value">{{ library_summary.owned_total }}</p>
             <p class="glance-card__meta">
               {{ library_summary.finished_total }} completed · {{ library_summary.completion_percent }}% cleared
             </p>
-          </article>
-          <article class="glance-card">
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='backlog') }}"
+            aria-label="Jump to backlog games"
+          >
             <h3>Ready to start</h3>
             <p class="glance-card__value">{{ library_summary.backlog_total }}</p>
             <p class="glance-card__meta">Waiting patiently in backlog</p>
-          </article>
-          <article class="glance-card">
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='rotation') }}"
+            aria-label="Open the in-rotation filter"
+          >
             <h3>In rotation</h3>
             <p class="glance-card__value">{{ library_summary.active_total }}</p>
             <p class="glance-card__meta">Currently tagged as playing or occasional</p>
-          </article>
-          <article class="glance-card">
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='wishlist') }}"
+            aria-label="View wishlist entries"
+          >
             <h3>Wishlist</h3>
             <p class="glance-card__value">{{ library_summary.wishlist_total }}</p>
             <p class="glance-card__meta">Potential picks waiting to join the fun</p>
-          </article>
-          <article class="glance-card">
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.sessions_page') }}"
+            aria-label="Review all logged sessions"
+          >
             <h3>Sessions logged</h3>
             <p class="glance-card__value">{{ library_summary.total_sessions }}</p>
             <p class="glance-card__meta">Every playthrough gets captured here</p>
-          </article>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='completed') }}"
+            aria-label="See completed adventures"
+          >
+            <h3>Completed adventures</h3>
+            <p class="glance-card__value">{{ library_summary.completed_total }}</p>
+            <p class="glance-card__meta">Story clear or full completion runs</p>
+          </a>
         </div>
       </section>
 
@@ -68,29 +97,39 @@
           <ul class="recent-games">
             {% for entry in recent_games %}
               <li class="recent-game">
-                <div class="recent-game__intro">
-                  <h3>{{ entry.title }}</h3>
-                  <p>Last played {{ entry.session_date.strftime('%b %d, %Y') }}</p>
-                </div>
-                <div class="recent-game__meta">
-                  <span class="recent-game__pill">{{ entry.playtime_minutes }} min</span>
-                  <span class="recent-game__pill sentiment sentiment--{{ entry.sentiment }}">
-                    {{ entry.sentiment|capitalize }} mood
-                  </span>
-                  {% if entry.game %}
-                    <span class="recent-game__status">
-                      {{ entry.game.status.replace('_', ' ')|title }}
-                    </span>
-                  {% endif %}
-                </div>
-                <div class="recent-game__actions">
-                  {% if entry.game %}
-                    <a class="link-button" href="{{ url_for('core.game_detail_page', game_id=entry.game.id) }}">
-                      Open game details
-                    </a>
+                <div class="recent-game__media">
+                  {% if entry.image_url %}
+                    <img src="{{ entry.image_url }}" alt="{{ entry.title }} cover art" />
                   {% else %}
-                    <a class="link-button" href="{{ url_for('core.sessions_page') }}">View in session log</a>
+                    {% set fallback = entry.title[:1] if entry.title else '?' %}
+                    <div class="recent-game__placeholder" aria-hidden="true">{{ fallback|upper }}</div>
                   {% endif %}
+                </div>
+                <div class="recent-game__body">
+                  <div class="recent-game__intro">
+                    <h3>{{ entry.title }}</h3>
+                    <p>Last played {{ entry.session_date.strftime('%b %d, %Y') }}</p>
+                  </div>
+                  <div class="recent-game__meta">
+                    <span class="recent-game__pill">{{ entry.playtime_minutes }} min</span>
+                    <span class="recent-game__pill sentiment sentiment--{{ entry.sentiment }}">
+                      {{ entry.sentiment|capitalize }} mood
+                    </span>
+                    {% if entry.game %}
+                      <span class="recent-game__status">
+                        {{ entry.game.status.replace('_', ' ')|title }}
+                      </span>
+                    {% endif %}
+                  </div>
+                  <div class="recent-game__actions">
+                    {% if entry.game %}
+                      <a class="link-button" href="{{ url_for('core.game_detail_page', game_id=entry.game.id) }}">
+                        Open game details
+                      </a>
+                    {% else %}
+                      <a class="link-button" href="{{ url_for('core.sessions_page') }}">View in session log</a>
+                    {% endif %}
+                  </div>
                 </div>
               </li>
             {% endfor %}

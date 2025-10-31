@@ -37,6 +37,16 @@ from .statuses import (
 
 bp = Blueprint("core", __name__)
 
+LIBRARY_FILTER_KEYS = {
+    "all",
+    "owned",
+    "backlog",
+    "rotation",
+    "wishlist",
+    "completed",
+    "dropped",
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,6 +107,7 @@ def home():
         "dropped_total": dropped_total,
         "total_sessions": total_sessions,
         "completion_percent": round((finished_total / owned_total) * 100) if owned_total else 0,
+        "completed_total": finished_total,
     }
 
     recent_window = date.today() - timedelta(days=14)
@@ -150,6 +161,7 @@ def home():
                 "playtime_minutes": session.playtime_minutes,
                 "sentiment": session.sentiment,
                 "game": game,
+                "image_url": game.icon_url if game else None,
             }
         )
         if len(recent_games) >= 6:
@@ -194,7 +206,11 @@ def add_game_page():
 
 @bp.route("/library")
 def library_page():
-    return render_template("library.html", page_id="library")
+    requested = (request.args.get("filter") or "all").strip().lower()
+    initial_filter = requested if requested in LIBRARY_FILTER_KEYS else "all"
+    return render_template(
+        "library.html", page_id="library", initial_filter=initial_filter
+    )
 
 
 @bp.route("/rankings")
