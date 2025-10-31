@@ -147,12 +147,18 @@ def home():
         }
 
     recent_games = []
-    seen_keys: set[str | int] = set()
+    seen_ids: set[int] = set()
+    seen_titles: set[str] = set()
     for session in recent_sessions:
-        key: str | int = session.game_id or session.game_title.lower()
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
+        normalized_title = (session.game_title or "").strip().casefold()
+        if normalized_title:
+            if normalized_title in seen_titles:
+                continue
+            seen_titles.add(normalized_title)
+        elif session.game_id:
+            if session.game_id in seen_ids:
+                continue
+            seen_ids.add(session.game_id)
         game = session.game or title_map.get(session.game_title)
         recent_games.append(
             {
