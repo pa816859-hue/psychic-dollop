@@ -1,34 +1,219 @@
 {% extends "base.html" %}
 
+{% block title %}Home · Gaming Assistant{% endblock %}
+
 {% block header_extra %}
-  <div class="hero">
+  <section class="hero home-hero">
     <div class="hero-text">
-      <p class="eyebrow">Game backlog companion</p>
-      <h1>Queue up your next adventure</h1>
+      <p class="eyebrow">Gaming Assistant</p>
+      <h1>Your gaming life, organized</h1>
       <p>
-        Import from Steam, track every session, and let ELO-style matchups surface the next game you
-        should play.
+        Track play sessions, surface the perfect next pick, and keep your backlog under control—all
+        from one welcoming command center.
       </p>
     </div>
     <div class="hero-cta">
-      <a class="primary" href="{{ url_for('core.add_game_page') }}">Start adding games</a>
-      <a class="secondary" href="{{ url_for('core.settings_page') }}">Sync with Steam</a>
+      <a class="primary" href="{{ url_for('core.sessions_page') }}">Log a session</a>
+      <a class="secondary" href="{{ url_for('core.library_page') }}">Review your library</a>
+      <a class="secondary" href="{{ url_for('core.add_game_page') }}">Add a new game</a>
     </div>
-  </div>
+  </section>
 {% endblock %}
 
 {% block content %}
-  <section class="panel">
-    <div class="panel-heading">
-      <h2>Welcome to Deck Commander</h2>
-      <p>
-        Use the navigation above to add games, browse your library, run ELO comparisons, log play
-        sessions, or manage Steam integrations.
-      </p>
+  <div class="home-dashboard">
+    <div class="home-dashboard__primary">
+      <section class="panel home-overview">
+        <div class="panel-heading">
+          <h2>At a glance</h2>
+          <p>Everything you need to decide what to play tonight.</p>
+        </div>
+        <div class="glance-metrics">
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='owned') }}"
+            aria-label="View owned games in your library"
+          >
+            <h3>Owned library</h3>
+            <p class="glance-card__value">{{ library_summary.owned_total }}</p>
+            <p class="glance-card__meta">
+              {{ library_summary.finished_total }} completed · {{ library_summary.completion_percent }}% cleared
+            </p>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='backlog') }}"
+            aria-label="Jump to backlog games"
+          >
+            <h3>Ready to start</h3>
+            <p class="glance-card__value">{{ library_summary.backlog_total }}</p>
+            <p class="glance-card__meta">Waiting patiently in backlog</p>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='rotation') }}"
+            aria-label="Open the in-rotation filter"
+          >
+            <h3>In rotation</h3>
+            <p class="glance-card__value">{{ library_summary.active_total }}</p>
+            <p class="glance-card__meta">Currently tagged as playing or occasional</p>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='wishlist') }}"
+            aria-label="View wishlist entries"
+          >
+            <h3>Wishlist</h3>
+            <p class="glance-card__value">{{ library_summary.wishlist_total }}</p>
+            <p class="glance-card__meta">Potential picks waiting to join the fun</p>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.sessions_page') }}"
+            aria-label="Review all logged sessions"
+          >
+            <h3>Sessions logged</h3>
+            <p class="glance-card__value">{{ library_summary.total_sessions }}</p>
+            <p class="glance-card__meta">Every playthrough gets captured here</p>
+          </a>
+          <a
+            class="glance-card"
+            href="{{ url_for('core.library_page', filter='completed') }}"
+            aria-label="See completed adventures"
+          >
+            <h3>Completed adventures</h3>
+            <p class="glance-card__value">{{ library_summary.completed_total }}</p>
+            <p class="glance-card__meta">Story clear or full completion runs</p>
+          </a>
+        </div>
+      </section>
+
+      <section class="panel home-recent">
+        <div class="panel-heading">
+          <h2>Recently played</h2>
+          <p>Jump back into the games that have your attention right now.</p>
+        </div>
+        {% if recent_games %}
+          <ul class="recent-games">
+            {% for entry in recent_games %}
+              <li class="recent-game">
+                <div class="recent-game__media">
+                  {% if entry.image_url %}
+                    <img src="{{ entry.image_url }}" alt="{{ entry.title }} cover art" />
+                  {% else %}
+                    {% set fallback = entry.title[:1] if entry.title else '?' %}
+                    <div class="recent-game__placeholder" aria-hidden="true">{{ fallback|upper }}</div>
+                  {% endif %}
+                </div>
+                <div class="recent-game__body">
+                  <div class="recent-game__intro">
+                    <h3>{{ entry.title }}</h3>
+                    <p>Last played {{ entry.session_date.strftime('%b %d, %Y') }}</p>
+                  </div>
+                  <div class="recent-game__meta">
+                    <span class="recent-game__pill">{{ entry.playtime_minutes }} min</span>
+                    <span class="recent-game__pill sentiment sentiment--{{ entry.sentiment }}">
+                      {{ entry.sentiment|capitalize }} mood
+                    </span>
+                    {% if entry.game %}
+                      <span class="recent-game__status">
+                        {{ entry.game.status.replace('_', ' ')|title }}
+                      </span>
+                    {% endif %}
+                  </div>
+                  <div class="recent-game__actions">
+                    {% if entry.game %}
+                      <a class="link-button" href="{{ url_for('core.game_detail_page', game_id=entry.game.id) }}">
+                        Open game details
+                      </a>
+                    {% else %}
+                      <a class="link-button" href="{{ url_for('core.sessions_page') }}">View in session log</a>
+                    {% endif %}
+                  </div>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="empty-state">Log a play session to build your personalized quick-launch list.</p>
+        {% endif %}
+      </section>
     </div>
-    <p>
-      Each tool now lives on its own dedicated page to make room for future features and keep things
-      organized as your collection grows.
-    </p>
-  </section>
+
+    <div class="home-dashboard__aside">
+      <section class="panel home-activity">
+        <div class="panel-heading">
+          <h2>Activity snapshot</h2>
+          <p>Highlights from the past two weeks.</p>
+        </div>
+        <dl class="activity-list">
+          <div class="activity-item">
+            <dt>Playtime (14 days)</dt>
+            <dd class="{% if not activity_summary.recent_minutes %}is-muted{% endif %}">
+              {{ activity_summary.recent_playtime_label }}
+            </dd>
+          </div>
+          <div class="activity-item">
+            <dt>Active days</dt>
+            <dd>{{ activity_summary.active_days }}</dd>
+          </div>
+          <div class="activity-item">
+            <dt>Overall mood</dt>
+            <dd class="{% if not activity_summary.dominant_sentiment %}is-muted{% endif %}">
+              {% if activity_summary.dominant_sentiment %}
+                {{ activity_summary.dominant_sentiment }}
+              {% else %}
+                No recent sentiment data
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+        {% if activity_summary.last_session %}
+          <div class="activity-callout">
+            <h3>Last session</h3>
+            <p>
+              {{ activity_summary.last_session.session_date.strftime('%b %d, %Y') }} ·
+              {{ activity_summary.last_session.game_title }} ·
+              {{ activity_summary.last_session.playtime_minutes }} min ·
+              {{ activity_summary.last_session.sentiment|capitalize }} mood
+            </p>
+            <div class="activity-callout__actions">
+              <a class="link-button" href="{{ url_for('core.sessions_page') }}">Open session log</a>
+              {% if activity_summary.last_session_game %}
+                <a
+                  class="link-button"
+                  href="{{ url_for('core.game_detail_page', game_id=activity_summary.last_session_game.id) }}"
+                >
+                  View game page
+                </a>
+              {% endif %}
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">Your activity snapshot will appear once you've logged a session.</p>
+        {% endif %}
+      </section>
+
+      <section class="panel home-shortcuts">
+        <div class="panel-heading">
+          <h2>Quick shortcuts</h2>
+          <p>Everything important is one tap away.</p>
+        </div>
+        <div class="shortcut-grid">
+          <a class="shortcut-card" href="{{ url_for('core.rankings_page') }}">
+            <span class="shortcut-title">Head-to-head rankings</span>
+            <span class="shortcut-meta">Settle what to play next with ELO matchups.</span>
+          </a>
+          <a class="shortcut-card" href="{{ url_for('core.insights_page') }}">
+            <span class="shortcut-title">Insights dashboard</span>
+            <span class="shortcut-meta">Dive into play trends and backlog health.</span>
+          </a>
+          <a class="shortcut-card" href="{{ url_for('core.settings_page') }}">
+            <span class="shortcut-title">Integrations & settings</span>
+            <span class="shortcut-meta">Connect services and fine-tune preferences.</span>
+          </a>
+        </div>
+      </section>
+    </div>
+  </div>
 {% endblock %}

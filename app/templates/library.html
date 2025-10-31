@@ -1,14 +1,36 @@
 {% extends "base.html" %}
 
-{% block title %}Library · Deck Commander{% endblock %}
+{% block title %}Library · Gaming Assistant{% endblock %}
 
 {% block content %}
-  <section class="panel" id="lists">
+  <section class="panel" id="lists" data-initial-filter="{{ initial_filter }}">
     <div class="panel-heading">
       <h2>Your library</h2>
       <p>Browse and manage every stage of your library, from wishlist to full clears.</p>
     </div>
     <div class="library-controls">
+      {% set library_filters = [
+        ('all', 'All'),
+        ('owned', 'Owned'),
+        ('backlog', 'Backlog'),
+        ('rotation', 'In rotation'),
+        ('completed', 'Completed'),
+        ('wishlist', 'Wishlist'),
+        ('dropped', 'Dropped')
+      ] %}
+      <div class="library-filter-chips" role="toolbar" aria-label="Filter library">
+        {% for value, label in library_filters %}
+          {% set is_active = (initial_filter == value) %}
+          <button
+            type="button"
+            class="chip{% if is_active %} is-active{% endif %}"
+            data-library-filter="{{ value }}"
+            aria-pressed="{{ 'true' if is_active else 'false' }}"
+          >
+            {{ label }}
+          </button>
+        {% endfor %}
+      </div>
       <div class="field library-search">
         <label for="library-search">Search library</label>
         <div class="library-search__input">
