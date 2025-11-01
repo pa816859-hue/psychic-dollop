@@ -419,36 +419,76 @@ def summarize_price_insights(
     currency_totals: dict[str, dict[str, Any]] = defaultdict(_init_currency_record)
     backlog_candidates: list[dict[str, Any]] = []
     wishlist_candidates: list[dict[str, Any]] = []
-    priced_games: list[tuple[Game, str, float, str]] = []
+    priced_games: list[dict[str, Any]] = []
+    savings_totals: dict[str, dict[str, float]] = defaultdict(
+        lambda: {
+            "total_saved": 0.0,
+            "discounted_count": 0,
+            "percent_total": 0.0,
+            "percent_count": 0,
+        }
+    )
+    savings_entries: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     games: Iterable[Game] = Game.query.all()
     for game in games:
-        if game.price_amount is None:
-            continue
-
-        try:
-            amount = float(game.price_amount)
-        except (TypeError, ValueError):
-            continue
-        if amount < 0:
-            continue
-
-        currency = (game.price_currency or "MYR").upper()
         status = (game.status or "").lower()
+
+        list_amount: float | None = None
+        list_currency: str | None = None
+        if game.price_amount is not None:
+            try:
+                list_amount = float(game.price_amount)
+            except (TypeError, ValueError):
+                list_amount = None
+            else:
+                if list_amount < 0:
+                    list_amount = None
+                else:
+                    list_currency = (game.price_currency or "MYR").upper()
+
+        purchase_amount: float | None = None
+        purchase_currency: str | None = None
+        if game.purchase_price_amount is not None:
+            try:
+                purchase_amount = float(game.purchase_price_amount)
+            except (TypeError, ValueError):
+                purchase_amount = None
+            else:
+                if purchase_amount < 0:
+                    purchase_amount = None
+                else:
+                    purchase_currency = (
+                        game.purchase_price_currency or list_currency or "MYR"
+                    )
+                    if purchase_currency:
+                        purchase_currency = purchase_currency.upper()
+
+        effective_amount = (
+            purchase_amount if purchase_amount is not None else list_amount
+        )
+        if effective_amount is None:
+            continue
+
+        currency = (purchase_currency or list_currency or "MYR").upper()
+        if list_amount is not None and not list_currency:
+            list_currency = currency
+        if purchase_amount is not None and not purchase_currency:
+            purchase_currency = currency
 
         record = currency_totals[currency]
         if status in OWNED_STATUSES:
-            record["owned_amount"] += amount
+            record["owned_amount"] += effective_amount
             record["owned_count"] += 1
 
         if status == "backlog":
-            record["backlog_amount"] += amount
+            record["backlog_amount"] += effective_amount
             record["backlog_count"] += 1
             backlog_candidates.append(
                 {
                     "id": game.id,
                     "title": game.title,
-                    "price": {"amount": amount, "currency": currency},
+                    "price": {"amount": effective_amount, "currency": currency},
                     "purchase_date": game.purchase_date.isoformat()
                     if game.purchase_date
                     else None,
@@ -459,13 +499,13 @@ def summarize_price_insights(
                 }
             )
         elif status == "wishlist":
-            record["wishlist_amount"] += amount
+            record["wishlist_amount"] += effective_amount
             record["wishlist_count"] += 1
             wishlist_candidates.append(
                 {
                     "id": game.id,
                     "title": game.title,
-                    "price": {"amount": amount, "currency": currency},
+                    "price": {"amount": effective_amount, "currency": currency},
                     "elo_rating": float(game.elo_rating or 0.0),
                     "created_at": game.created_at.isoformat()
                     if isinstance(game.created_at, datetime)
@@ -473,9 +513,62 @@ def summarize_price_insights(
                 }
             )
 
-        priced_games.append((game, currency, amount, status))
+        if (
+            purchase_amount is not None
+            and list_amount is not None
+            and list_currency == currency
+            and purchase_currency == currency
+            and list_amount > purchase_amount
+        ):
+            saved_amount = list_amount - purchase_amount
+            savings_record = savings_totals[currency]
+            savings_record["total_saved"] += saved_amount
+            savings_record["discounted_count"] += 1
+            percent = None
+            if list_amount > 0:
+                percent = (saved_amount / list_amount) * 100.0
+                savings_record["percent_total"] += percent
+                savings_record["percent_count"] += 1
 
-    priced_game_ids = [game.id for game, _, _, _ in priced_games if game.id]
+            savings_entries[currency].append(
+                {
+                    "id": game.id,
+                    "title": game.title,
+                    "list_price": {"amount": list_amount, "currency": currency},
+                    "purchase_price": {
+                        "amount": purchase_amount,
+                        "currency": currency,
+                    },
+                    "saved_amount": saved_amount,
+                    "saved_percent": percent,
+                    "purchase_date": game.purchase_date.isoformat()
+                    if isinstance(game.purchase_date, date)
+                    else None,
+                }
+            )
+
+        priced_games.append(
+            {
+                "game": game,
+                "currency": currency,
+                "amount": effective_amount,
+                "status": status,
+                "list_price": (
+                    {"amount": list_amount, "currency": list_currency}
+                    if list_amount is not None and list_currency
+                    else None
+                ),
+                "purchase_price": (
+                    {"amount": purchase_amount, "currency": purchase_currency}
+                    if purchase_amount is not None and purchase_currency
+                    else None
+                ),
+            }
+        )
+
+    priced_game_ids = [
+        entry["game"].id for entry in priced_games if entry.get("game") and entry["game"].id
+    ]
     sessions_by_game: dict[int, list[SessionLog]] = defaultdict(list)
     if priced_game_ids:
         session_rows: Iterable[SessionLog] = SessionLog.query.filter(
@@ -487,7 +580,13 @@ def summarize_price_insights(
 
     value_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
-    for game, currency, amount, status in priced_games:
+    for entry in priced_games:
+        game = entry["game"]
+        currency = entry["currency"]
+        amount = entry["amount"]
+        status = entry["status"]
+        list_price = entry.get("list_price")
+        purchase_price = entry.get("purchase_price")
         sessions = sessions_by_game.get(game.id or -1, [])
         total_minutes = 0.0
         for session in sessions:
@@ -510,6 +609,11 @@ def summarize_price_insights(
             "enjoyment_per_cost": None,
             "sentiment_score": None,
         }
+
+        if purchase_price:
+            value_entry["purchase_price"] = purchase_price
+        if list_price:
+            value_entry["list_price"] = list_price
 
         if total_hours > 0:
             hours_per_currency = (total_hours / amount) if amount > 0 else None
@@ -617,6 +721,64 @@ def summarize_price_insights(
         for currency, record in currency_totals.items()
     }
 
+    savings_summary: dict[str, dict[str, Any]] = {}
+    for currency, totals in savings_totals.items():
+        discounted_count = int(totals.get("discounted_count", 0) or 0)
+        if discounted_count <= 0:
+            continue
+
+        total_saved = float(totals.get("total_saved", 0.0) or 0.0)
+        percent_count = totals.get("percent_count", 0) or 0
+        percent_total = float(totals.get("percent_total", 0.0) or 0.0)
+        average_discount = (
+            percent_total / percent_count if percent_count else None
+        )
+
+        entries = savings_entries.get(currency, [])
+        entries.sort(
+            key=lambda item: (
+                float(item.get("saved_amount", 0.0) or 0.0),
+                float(item.get("saved_percent") or 0.0),
+            ),
+            reverse=True,
+        )
+        limit = max(0, int(top_limit))
+        formatted_entries: list[dict[str, Any]] = []
+        for entry in entries[:limit]:
+            formatted: dict[str, Any] = {
+                "id": entry.get("id"),
+                "title": entry.get("title"),
+                "saved_amount": round(float(entry.get("saved_amount", 0.0)), 2),
+                "saved_percent": (
+                    round(float(entry.get("saved_percent")), 1)
+                    if entry.get("saved_percent") is not None
+                    else None
+                ),
+                "purchase_date": entry.get("purchase_date"),
+            }
+            list_price = entry.get("list_price")
+            if isinstance(list_price, dict):
+                formatted["list_price"] = {
+                    "amount": round(float(list_price.get("amount", 0.0)), 2),
+                    "currency": list_price.get("currency", currency),
+                }
+            purchase_price = entry.get("purchase_price")
+            if isinstance(purchase_price, dict):
+                formatted["purchase_price"] = {
+                    "amount": round(float(purchase_price.get("amount", 0.0)), 2),
+                    "currency": purchase_price.get("currency", currency),
+                }
+            formatted_entries.append(formatted)
+
+        savings_summary[currency] = {
+            "total_saved": round(total_saved, 2),
+            "discounted_count": discounted_count,
+            "average_discount_percent": (
+                round(average_discount, 1) if average_discount is not None else None
+            ),
+            "top_deals": formatted_entries,
+        }
+
     primary_currency = None
     if resolved_totals:
         primary_currency = max(
@@ -646,6 +808,7 @@ def summarize_price_insights(
             ),
         },
         "value_for_money": value_summary,
+        "savings": savings_summary,
     }
 
 

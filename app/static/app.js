@@ -235,13 +235,39 @@ function getPriceInfo(game) {
     return null;
   }
 
+  const priceFallback =
+    typeof game.price_currency === "string" && game.price_currency.trim()
+      ? game.price_currency.trim().toUpperCase()
+      : "MYR";
+
+  if (typeof game.purchase_price_amount === "number") {
+    const purchaseCurrency =
+      typeof game.purchase_price_currency === "string" &&
+      game.purchase_price_currency.trim()
+        ? game.purchase_price_currency.trim().toUpperCase()
+        : priceFallback;
+    return {
+      amount: Number(game.purchase_price_amount),
+      currency: purchaseCurrency,
+    };
+  }
+
+  const purchasePrice = game.purchase_price;
+  if (purchasePrice && typeof purchasePrice === "object") {
+    const purchaseAmount = Number(purchasePrice.amount);
+    if (Number.isFinite(purchaseAmount)) {
+      const purchaseCurrency =
+        typeof purchasePrice.currency === "string" && purchasePrice.currency.trim()
+          ? purchasePrice.currency.trim().toUpperCase()
+          : priceFallback;
+      return { amount: purchaseAmount, currency: purchaseCurrency };
+    }
+  }
+
   if (typeof game.price_amount === "number") {
     return {
       amount: Number(game.price_amount),
-      currency:
-        typeof game.price_currency === "string" && game.price_currency.trim()
-          ? game.price_currency.trim().toUpperCase()
-          : "MYR",
+      currency: priceFallback,
     };
   }
 
@@ -1786,6 +1812,9 @@ function renderPricingInsights(root, summary) {
     backlog: container.querySelector(
       '[data-pricing-metric="backlog-value"] .insights-card__value'
     ),
+    savings: container.querySelector(
+      '[data-pricing-metric="savings"] .insights-card__value'
+    ),
     wishlist: container.querySelector(
       '[data-pricing-metric="wishlist-value"] .insights-card__value'
     ),
@@ -2027,6 +2056,33 @@ function renderPricingInsights(root, summary) {
       : wishlistValue
   );
 
+  if (metrics.savings) {
+    const savingsRecord = summary?.savings?.[primaryCurrency];
+    if (savingsRecord) {
+      const parts = [];
+      const savedLabel = formatCurrencyValue(savingsRecord.total_saved);
+      const discountedCount = savingsRecord.discounted_count ?? 0;
+      const averageDiscount = savingsRecord.average_discount_percent;
+      if (savedLabel) {
+        parts.push(savedLabel);
+      }
+      if (Number.isFinite(discountedCount) && discountedCount > 0) {
+        parts.push(
+          `${discountedCount.toLocaleString()} deal${
+            discountedCount === 1 ? "" : "s"
+          }`
+        );
+      }
+      if (Number.isFinite(averageDiscount) && averageDiscount > 0) {
+        const precision = averageDiscount >= 10 ? 0 : 1;
+        parts.push(`${averageDiscount.toFixed(precision)}% avg discount`);
+      }
+      setMetric(metrics.savings, parts.join(" • ") || null);
+    } else {
+      setMetric(metrics.savings, null);
+    }
+  }
+
   const avgTracked = formatHoursLabel(currencyRecord.average_tracked_hours);
   setMetric(
     metrics.averageHours,
@@ -2111,6 +2167,69 @@ function renderPricingInsights(root, summary) {
           item.appendChild(detail);
         }
         wishlistHighlight.appendChild(item);
+      });
+    }
+  }
+
+  const savingsHighlight = container.querySelector(
+    '[data-pricing-list="savings"]'
+  );
+  if (savingsHighlight) {
+    const savingsEntries = Array.isArray(
+      summary?.savings?.[primaryCurrency]?.top_deals
+    )
+      ? summary.savings[primaryCurrency].top_deals
+      : [];
+    savingsHighlight.innerHTML = "";
+    if (savingsEntries.length === 0) {
+      const placeholder = savingsHighlight.dataset.placeholderText;
+      savingsHighlight.textContent =
+        placeholder ||
+        "Record list and purchase prices to highlight your best deals.";
+    } else {
+      savingsEntries.forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "pricing-insights__list-item";
+
+        const title = document.createElement("strong");
+        title.textContent = entry.title || "Untitled";
+        item.appendChild(title);
+
+        const details = [];
+        const savedLabel = formatPrice({
+          amount: entry.saved_amount,
+          currency: primaryCurrency,
+        });
+        if (savedLabel) {
+          details.push(`Saved ${savedLabel}`);
+        }
+
+        const percent = Number(entry.saved_percent);
+        if (Number.isFinite(percent) && percent > 0) {
+          const precision = percent >= 10 ? 0 : 1;
+          details.push(`${percent.toFixed(precision)}% off`);
+        }
+
+        const paidLabel = formatPrice(entry.purchase_price);
+        const listLabel = formatPrice(entry.list_price);
+        if (paidLabel && listLabel) {
+          details.push(`${paidLabel} vs ${listLabel}`);
+        } else if (paidLabel) {
+          details.push(`Paid ${paidLabel}`);
+        }
+
+        if (entry.purchase_date) {
+          details.push(`Purchased ${formatDateForDisplay(entry.purchase_date)}`);
+        }
+
+        if (details.length > 0) {
+          const detail = document.createElement("span");
+          detail.className = "pricing-insights__detail";
+          detail.textContent = details.join(" • ");
+          item.appendChild(detail);
+        }
+
+        savingsHighlight.appendChild(item);
       });
     }
   }
@@ -3092,6 +3211,9 @@ async function initGameDetailPage() {
   const statusSelect = document.getElementById("game-edit-status");
   const purchaseInput = document.getElementById("game-edit-purchase-date");
   const purchaseField = document.getElementById("game-edit-purchase-field");
+  const purchasePriceAmountInput = document.getElementById(
+    "game-edit-purchase-price-amount"
+  );
   const startInput = document.getElementById("game-edit-start-date");
   const finishInput = document.getElementById("game-edit-finish-date");
   const thoughtsInput = document.getElementById("game-edit-thoughts");
@@ -3101,6 +3223,7 @@ async function initGameDetailPage() {
     title: titleInput?.value || "",
     status: statusSelect?.value || DEFAULT_STATUS,
     purchase: purchaseInput?.value || "",
+    purchasePrice: purchasePriceAmountInput?.value || "",
     start: startInput?.value || "",
     finish: finishInput?.value || "",
     thoughts: thoughtsInput?.value || "",
@@ -3125,6 +3248,8 @@ async function initGameDetailPage() {
     if (titleInput) titleInput.value = initialValues.title;
     if (statusSelect) statusSelect.value = initialValues.status;
     if (purchaseInput) purchaseInput.value = initialValues.purchase;
+    if (purchasePriceAmountInput)
+      purchasePriceAmountInput.value = initialValues.purchasePrice;
     if (startInput) startInput.value = initialValues.start;
     if (finishInput) finishInput.value = initialValues.finish;
     if (thoughtsInput) thoughtsInput.value = initialValues.thoughts;
@@ -3210,6 +3335,7 @@ async function initGameDetailPage() {
       if (!titleInput || !statusSelect || !editSubmit) return;
 
       const purchaseValue = purchaseInput?.value?.trim() || "";
+      const purchasePriceValue = purchasePriceAmountInput?.value?.trim() || "";
       const startValue = startInput?.value?.trim() || "";
       const finishValue = finishInput?.value?.trim() || "";
       const thoughtsValue = thoughtsInput?.value?.trim() || "";
@@ -3218,6 +3344,7 @@ async function initGameDetailPage() {
         title: titleInput.value.trim(),
         status: statusSelect.value,
         purchase_date: purchaseValue || null,
+        purchase_price_amount: purchasePriceValue ? Number(purchasePriceValue) : null,
         start_date: startValue || null,
         finish_date: finishValue || null,
         thoughts: thoughtsValue || null,
@@ -3227,6 +3354,17 @@ async function initGameDetailPage() {
         if (editMessage) editMessage.textContent = "Title is required.";
         titleInput.focus();
         return;
+      }
+
+      if (purchasePriceValue) {
+        if (!Number.isFinite(payload.purchase_price_amount) || payload.purchase_price_amount < 0) {
+          if (editMessage)
+            editMessage.textContent = "Enter a valid purchase price.";
+          purchasePriceAmountInput?.focus();
+          return;
+        }
+      } else {
+        payload.purchase_price_amount = null;
       }
 
       if (!statusRequiresPurchase(payload.status)) {

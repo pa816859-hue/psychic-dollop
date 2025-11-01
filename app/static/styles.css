@@ -1967,13 +1967,34 @@ textarea:focus {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.game-edit-field {
+.game-edit-field {  
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   color: var(--text-muted);
   text-transform: none;
   letter-spacing: 0.05em;
+}
+
+.game-edit-price-group {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+  align-items: center;
+}
+
+.game-edit-price-prefix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.4rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-muted);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .game-edit-field--full {
@@ -2454,10 +2475,23 @@ button.secondary:hover {
   gap: 1rem;
 }
 
+.game-detail-prices {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .game-detail-price {
   margin: 0;
   font-weight: 600;
   color: var(--accent);
+}
+
+.game-detail-price--purchase {
+  color: var(--text);
+}
+
+.game-detail-price--savings {
+  color: #7de3a0;
 }
 
 .game-detail-timeline {

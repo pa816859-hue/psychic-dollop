@@ -22,6 +22,8 @@ class Game(db.Model):
     elo_rating = db.Column(db.Float, nullable=False, default=1500.0)
     price_amount = db.Column(db.Float, nullable=True)
     price_currency = db.Column(db.String(8), nullable=True)
+    purchase_price_amount = db.Column(db.Float, nullable=True)
+    purchase_price_currency = db.Column(db.String(8), nullable=True)
     purchase_date = db.Column(db.Date, nullable=True)
     start_date = db.Column(db.Date, nullable=True)
     finish_date = db.Column(db.Date, nullable=True)
@@ -39,8 +41,17 @@ class Game(db.Model):
             "icon_url": self.icon_url,
             "short_description": self.short_description,
             "price_amount": self.price_amount,
-            "price_currency":
-            (self.price_currency or "MYR") if self.price_amount is not None else None,
+            "price_currency": (
+                (self.price_currency or "MYR")
+                if self.price_amount is not None
+                else None
+            ),
+            "purchase_price_amount": self.purchase_price_amount,
+            "purchase_price_currency": (
+                self.purchase_price_currency or self.price_currency or "MYR"
+                if self.purchase_price_amount is not None
+                else None
+            ),
             "elo_rating": self.elo_rating,
             "purchase_date": self.purchase_date.isoformat()
             if self.purchase_date
