@@ -459,6 +459,58 @@ def _search_steam_app_id(title: str) -> str | None:
     return fallback
 
 
+def _sanitize_tag_name(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _extract_user_tags(data: dict) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    def add_tag(name: str | None) -> bool:
+        normalized = (_sanitize_tag_name(name) or "").casefold()
+        if not normalized or normalized in seen:
+            return False
+        seen.add(normalized)
+        tags.append(_sanitize_tag_name(name) or "")
+        return len(tags) >= 10
+
+    def from_sequence(values: Iterable[str]) -> bool:
+        for value in values:
+            if add_tag(value):
+                return True
+        return False
+
+    def from_mapping(values: dict[str, int | float | None]) -> bool:
+        sorted_items = sorted(
+            ((key or "", weight or 0) for key, weight in values.items()),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        return from_sequence(name for name, _ in sorted_items)
+
+    raw_user_tags = data.get("user_defined_tags")
+    if isinstance(raw_user_tags, list) and from_sequence(raw_user_tags):
+        return tags
+
+    steamspy_tags = data.get("steamspy_tags")
+    if isinstance(steamspy_tags, dict) and from_mapping(steamspy_tags):
+        return tags
+    if isinstance(steamspy_tags, list) and from_sequence(steamspy_tags):
+        return tags
+
+    raw_tags = data.get("tags")
+    if isinstance(raw_tags, dict):
+        from_mapping(raw_tags)
+    elif isinstance(raw_tags, list):
+        from_sequence(raw_tags)
+
+    return tags
+
+
 def _fetch_steam_metadata(app_id: str) -> dict:
     app_id = (app_id or "").strip()
     if not app_id:
@@ -468,7 +520,18 @@ def _fetch_steam_metadata(app_id: str) -> dict:
     try:
         steam_rate_limiter.wait()
         response = requests.get(
-            url, params={"appids": app_id, "cc": "my", "l": "en"}, timeout=10
+            url,
+            params={
+                "appids": app_id,
+                "cc": "my",
+                "l": "en",
+                "filters": (
+                    "genres,steamspy_tags,tags,user_defined_tags,price_overview,"
+                    "is_free,short_description,about_the_game,header_image,"
+                    "capsule_image,capsule_imagev5,img_icon_url,name"
+                ),
+            },
+            timeout=10,
         )
         response.raise_for_status()
     except requests.RequestException as exc:
@@ -493,44 +556,7 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         if description:
             genres.append(description)
 
-    tags: list[str] = []
-    steamspy_tags = data.get("steamspy_tags")
-    if isinstance(steamspy_tags, dict):
-        sorted_tags = sorted(
-            ((name or "", score) for name, score in steamspy_tags.items()),
-            key=lambda item: item[1] or 0,
-            reverse=True,
-        )
-        for name, _ in sorted_tags:
-            name = name.strip()
-            if name:
-                tags.append(name)
-            if len(tags) >= 10:
-                break
-    elif isinstance(steamspy_tags, list):
-        for name in steamspy_tags:
-            if not isinstance(name, str):
-                continue
-            trimmed = name.strip()
-            if trimmed:
-                tags.append(trimmed)
-            if len(tags) >= 10:
-                break
-
-    if not tags:
-        raw_tags = data.get("tags")
-        if isinstance(raw_tags, dict):
-            sorted_tags = sorted(
-                ((name or "", weight) for name, weight in raw_tags.items()),
-                key=lambda item: item[1] or 0,
-                reverse=True,
-            )
-            for name, _ in sorted_tags:
-                name = name.strip()
-                if name:
-                    tags.append(name)
-                if len(tags) >= 10:
-                    break
+    tags = _extract_user_tags(data)
 
     combined_genres: list[str] = []
     seen: set[str] = set()
@@ -571,7 +597,7 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         price_amount = 0.0
         price_currency = "MYR"
 
-    return {
+    metadata = {
         "genres": combined_genres,
         "icon_url": icon_url,
         "title": title,
@@ -583,6 +609,16 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         if price_amount is not None
         else None,
     }
+
+    logger.debug(
+        "Fetched Steam metadata for app %s: %s genres, %s tags, price=%s",
+        app_id,
+        len(genres),
+        len(tags),
+        metadata.get("price"),
+    )
+
+    return metadata
 
 
 def _apply_steam_metadata(
@@ -1171,13 +1207,39 @@ def refresh_game_metadata(game_id: int):
     if not game.steam_app_id:
         return jsonify({"error": "This game does not have a Steam App ID."}), 400
 
+    logger.info(
+        "Refreshing Steam metadata for game %s (id=%s, app_id=%s)",
+        game.title,
+        game.id,
+        game.steam_app_id,
+    )
+
     try:
         metadata = _fetch_steam_metadata(game.steam_app_id)
     except SteamMetadataError as exc:
+        logger.error(
+            "Failed to refresh Steam metadata for game %s (id=%s, app_id=%s): %s",
+            game.title,
+            game.id,
+            game.steam_app_id,
+            exc,
+        )
         return jsonify({"error": str(exc)}), exc.status_code
 
     _apply_steam_metadata(game, game.steam_app_id, metadata)
     db.session.commit()
+
+    logger.info(
+        "Updated Steam metadata for game %s (id=%s): %s genres, price=%s",
+        game.title,
+        game.id,
+        len(game.genres or []),
+        (
+            f"{game.price_currency or 'MYR'} {game.price_amount:.2f}"
+            if game.price_amount is not None
+            else "unavailable"
+        ),
+    )
 
     return jsonify({"game": game.to_dict()})
 

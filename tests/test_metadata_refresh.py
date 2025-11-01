@@ -1,5 +1,6 @@
 from app import db
 from app.models import Game
+from app import routes as routes_module
 from app.routes import SteamMetadataError
 
 
@@ -8,6 +9,57 @@ def _create_game(title="Test", status="backlog", steam_app_id=None):
     db.session.add(game)
     db.session.commit()
     return game.id
+
+
+def test_fetch_steam_metadata_extracts_user_tags(monkeypatch):
+    captured = {}
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "789": {
+                    "success": True,
+                    "data": {
+                        "name": "Sample Game",
+                        "genres": [
+                            {"description": "Action"},
+                            {"description": "Adventure"},
+                        ],
+                        "user_defined_tags": ["Tag One", "Tag Two", "Tag Two"],
+                        "steamspy_tags": {"Tag Three": 20, "Tag Four": 10},
+                        "tags": {"Tag Five": 5},
+                        "short_description": "Sample description.",
+                        "price_overview": {"initial": 1234, "currency": "usd"},
+                        "header_image": "https://example.com/header.jpg",
+                    },
+                }
+            }
+
+    def fake_get(url, params, timeout):
+        captured["filters"] = params.get("filters")
+        captured["appids"] = params.get("appids")
+        return DummyResponse()
+
+    monkeypatch.setattr("app.routes.requests.get", fake_get)
+
+    metadata = routes_module._fetch_steam_metadata("789")
+
+    assert captured["appids"] == "789"
+    assert isinstance(captured.get("filters"), str)
+    assert "tags" in captured["filters"]
+    assert metadata["genres"][:2] == ["Action", "Adventure"]
+    assert metadata["genres"][2:] == [
+        "Tag One",
+        "Tag Two",
+        "Tag Three",
+        "Tag Four",
+        "Tag Five",
+    ]
+    assert metadata["icon_url"] == "https://example.com/header.jpg"
+    assert metadata["price"] == {"amount": 12.34, "currency": "USD"}
 
 
 def test_refresh_game_metadata_updates_fields(monkeypatch, client, app_instance):
