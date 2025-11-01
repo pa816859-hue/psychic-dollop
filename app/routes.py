@@ -467,7 +467,9 @@ def _fetch_steam_metadata(app_id: str) -> dict:
     url = "https://store.steampowered.com/api/appdetails"
     try:
         steam_rate_limiter.wait()
-        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response = requests.get(
+            url, params={"appids": app_id, "cc": "my", "l": "en"}, timeout=10
+        )
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SteamMetadataError(f"Steam API request failed: {exc}", 502) from exc
@@ -491,6 +493,54 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         if description:
             genres.append(description)
 
+    tags: list[str] = []
+    steamspy_tags = data.get("steamspy_tags")
+    if isinstance(steamspy_tags, dict):
+        sorted_tags = sorted(
+            ((name or "", score) for name, score in steamspy_tags.items()),
+            key=lambda item: item[1] or 0,
+            reverse=True,
+        )
+        for name, _ in sorted_tags:
+            name = name.strip()
+            if name:
+                tags.append(name)
+            if len(tags) >= 10:
+                break
+    elif isinstance(steamspy_tags, list):
+        for name in steamspy_tags:
+            if not isinstance(name, str):
+                continue
+            trimmed = name.strip()
+            if trimmed:
+                tags.append(trimmed)
+            if len(tags) >= 10:
+                break
+
+    if not tags:
+        raw_tags = data.get("tags")
+        if isinstance(raw_tags, dict):
+            sorted_tags = sorted(
+                ((name or "", weight) for name, weight in raw_tags.items()),
+                key=lambda item: item[1] or 0,
+                reverse=True,
+            )
+            for name, _ in sorted_tags:
+                name = name.strip()
+                if name:
+                    tags.append(name)
+                if len(tags) >= 10:
+                    break
+
+    combined_genres: list[str] = []
+    seen: set[str] = set()
+    for name in [*genres, *tags]:
+        normalized = name.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        combined_genres.append(name)
+
     icon_url = (
         data.get("header_image")
         or data.get("capsule_image")
@@ -509,11 +559,29 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         data.get("short_description") or data.get("about_the_game")
     )
 
+    price_amount: float | None = None
+    price_currency: str | None = None
+    price_overview = data.get("price_overview")
+    if isinstance(price_overview, dict):
+        raw_amount = price_overview.get("initial") or price_overview.get("final")
+        if isinstance(raw_amount, (int, float)):
+            price_amount = round(float(raw_amount) / 100, 2)
+            price_currency = (price_overview.get("currency") or "MYR").upper()
+    elif data.get("is_free"):
+        price_amount = 0.0
+        price_currency = "MYR"
+
     return {
-        "genres": genres,
+        "genres": combined_genres,
         "icon_url": icon_url,
         "title": title,
         "short_description": short_description,
+        "price": {
+            "amount": price_amount,
+            "currency": price_currency,
+        }
+        if price_amount is not None
+        else None,
     }
 
 
@@ -524,6 +592,8 @@ def _apply_steam_metadata(
         game.genres = []
         game.icon_url = None
         game.short_description = None
+        game.price_amount = None
+        game.price_currency = None
         return
 
     if metadata is None:
@@ -532,6 +602,15 @@ def _apply_steam_metadata(
     game.genres = metadata.get("genres", [])
     game.icon_url = metadata.get("icon_url")
     game.short_description = metadata.get("short_description")
+    price_info = metadata.get("price")
+    if isinstance(price_info, dict) and price_info.get("amount") is not None:
+        amount = price_info.get("amount")
+        game.price_amount = float(amount)
+        currency = price_info.get("currency") or "MYR"
+        game.price_currency = currency.upper()
+    else:
+        game.price_amount = None
+        game.price_currency = None
     if not game.title:
         fetched_title = metadata.get("title")
         if fetched_title:
@@ -1069,6 +1148,7 @@ def games_resource(game_id: int):
             or not game.genres
             or not game.icon_url
             or not game.short_description
+            or game.price_amount is None
         )
         if should_refresh:
             try:
@@ -1083,6 +1163,72 @@ def games_resource(game_id: int):
     db.session.commit()
 
     return jsonify(game.to_dict())
+
+
+@bp.route("/api/games/<int:game_id>/refresh", methods=["POST"])
+def refresh_game_metadata(game_id: int):
+    game = Game.query.get_or_404(game_id)
+    if not game.steam_app_id:
+        return jsonify({"error": "This game does not have a Steam App ID."}), 400
+
+    try:
+        metadata = _fetch_steam_metadata(game.steam_app_id)
+    except SteamMetadataError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    _apply_steam_metadata(game, game.steam_app_id, metadata)
+    db.session.commit()
+
+    return jsonify({"game": game.to_dict()})
+
+
+@bp.route("/api/library/<status>/refresh", methods=["POST"])
+def refresh_library_status_metadata(status: str):
+    normalized_status = normalize_status_value(status)
+    if normalized_status not in STATUS_VALUES:
+        return jsonify({"error": "Unknown library status."}), 404
+
+    games = (
+        Game.query.filter(Game.status == normalized_status)
+        .filter(Game.steam_app_id.isnot(None))
+        .all()
+    )
+
+    if not games:
+        return jsonify({"updated": 0, "errors": [], "requested_status": normalized_status})
+
+    updated = 0
+    errors: list[dict] = []
+
+    for game in games:
+        try:
+            metadata = _fetch_steam_metadata(game.steam_app_id)
+        except SteamMetadataError as exc:
+            errors.append(
+                {
+                    "id": game.id,
+                    "title": game.title,
+                    "steam_app_id": game.steam_app_id,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        _apply_steam_metadata(game, game.steam_app_id, metadata)
+        updated += 1
+
+    if updated:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify(
+        {
+            "requested_status": normalized_status,
+            "updated": updated,
+            "errors": errors,
+        }
+    )
 
 
 def _interpolate_color(color_a: tuple[int, int, int], color_b: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
@@ -1293,7 +1439,9 @@ def delete_session(session_id: int):
 def steam_lookup(app_id: str):
     url = "https://store.steampowered.com/api/appdetails"
     try:
-        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response = requests.get(
+            url, params={"appids": app_id, "cc": "my", "l": "en"}, timeout=10
+        )
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:

@@ -37,6 +37,8 @@ def _ensure_game_columns() -> None:
         "start_date": "DATE",
         "finish_date": "DATE",
         "thoughts": "TEXT",
+        "price_amount": "REAL",
+        "price_currency": "VARCHAR(8)",
     }
 
     added = False

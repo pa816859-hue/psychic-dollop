@@ -51,40 +51,82 @@
         aria-live="polite"
         hidden
       ></p>
+      <p
+        class="hint library-refresh-feedback"
+        id="library-refresh-feedback"
+        role="status"
+        aria-live="polite"
+        hidden
+      ></p>
     </div>
     <div class="library-sections">
       <section class="library-section" data-library-status="backlog">
-        <h3>Backlog</h3>
+        <div class="library-section__header">
+          <h3>Backlog</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="backlog">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Owned titles waiting for their first session.</p>
         <ul class="game-list" data-library-list="backlog"></ul>
       </section>
       <section class="library-section" data-library-status="playing">
-        <h3>Playing</h3>
+        <div class="library-section__header">
+          <h3>Playing</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="playing">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Games currently in your regular rotation.</p>
         <ul class="game-list" data-library-list="playing"></ul>
       </section>
       <section class="library-section" data-library-status="occasional">
-        <h3>Occasional</h3>
+        <div class="library-section__header">
+          <h3>Occasional</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="occasional">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Titles you dip into when the mood strikes.</p>
         <ul class="game-list" data-library-list="occasional"></ul>
       </section>
       <section class="library-section" data-library-status="story_clear">
-        <h3>Story clear</h3>
+        <div class="library-section__header">
+          <h3>Story clear</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="story_clear">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Main story complete—side quests optional.</p>
         <ul class="game-list" data-library-list="story_clear"></ul>
       </section>
       <section class="library-section" data-library-status="full_clear">
-        <h3>Full clear</h3>
+        <div class="library-section__header">
+          <h3>Full clear</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="full_clear">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">100% or personal definition of done.</p>
         <ul class="game-list" data-library-list="full_clear"></ul>
       </section>
       <section class="library-section" data-library-status="dropped">
-        <h3>Dropped</h3>
+        <div class="library-section__header">
+          <h3>Dropped</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="dropped">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Paused indefinitely or no longer a focus.</p>
         <ul class="game-list" data-library-list="dropped"></ul>
       </section>
       <section class="library-section" data-library-status="wishlist">
-        <h3>Wishlist</h3>
+        <div class="library-section__header">
+          <h3>Wishlist</h3>
+          <button type="button" class="library-section__refresh" data-library-refresh="wishlist">
+            Refresh metadata
+          </button>
+        </div>
         <p class="hint">Games you're considering picking up.</p>
         <ul class="game-list" data-library-list="wishlist"></ul>
       </section>
