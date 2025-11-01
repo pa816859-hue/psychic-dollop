@@ -90,6 +90,7 @@ class RateLimiter:
 
 
 steam_rate_limiter = RateLimiter(0.35)
+steamspy_rate_limiter = RateLimiter(1.0)
 
 
 @bp.route("/")
@@ -477,7 +478,60 @@ def _sanitize_tag_name(value: str | None) -> str | None:
     return trimmed or None
 
 
-def _extract_user_tags(data: dict) -> list[str]:
+def _fetch_steamspy_tags(app_id: str) -> list[str]:
+    app_id = (app_id or "").strip()
+    if not app_id:
+        return []
+
+    url = "https://steamspy.com/api.php"
+    params = {"request": "appdetails", "appid": app_id}
+
+    try:
+        steamspy_rate_limiter.wait()
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("SteamSpy tag fetch failed for app %s: %s", app_id, exc)
+        return []
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.warning("SteamSpy returned invalid JSON for app %s: %s", app_id, exc)
+        return []
+
+    tags_field = payload.get("tags")
+    if not isinstance(tags_field, dict):
+        return []
+
+    sorted_items = sorted(
+        ((name or "", weight or 0) for name, weight in tags_field.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for name, _weight in sorted_items:
+        sanitized = _sanitize_tag_name(name)
+        if not sanitized:
+            continue
+        normalized = sanitized.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(sanitized)
+        if len(tags) >= 10:
+            break
+
+    if tags:
+        logger.info("Fetched %s SteamSpy tags for app %s", len(tags), app_id)
+        logger.debug("SteamSpy tags for app %s: %s", app_id, tags)
+
+    return tags
+
+
+def _extract_user_tags(data: dict, app_id: str | None = None) -> list[str]:
     tags: list[str] = []
     seen: set[str] = set()
 
@@ -518,6 +572,12 @@ def _extract_user_tags(data: dict) -> list[str]:
         from_mapping(raw_tags)
     elif isinstance(raw_tags, list):
         from_sequence(raw_tags)
+
+    if app_id and len(tags) < 10:
+        fallback_tags = _fetch_steamspy_tags(app_id)
+        for name in fallback_tags:
+            if add_tag(name):
+                break
 
     return tags
 
@@ -561,7 +621,7 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         if description:
             genres.append(description)
 
-    tags = _extract_user_tags(data)
+    tags = _extract_user_tags(data, app_id)
 
     combined_genres: list[str] = []
     seen: set[str] = set()

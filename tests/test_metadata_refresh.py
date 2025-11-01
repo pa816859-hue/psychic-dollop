@@ -43,6 +43,7 @@ def test_fetch_steam_metadata_extracts_user_tags(monkeypatch):
         return DummyResponse()
 
     monkeypatch.setattr("app.routes.requests.get", fake_get)
+    monkeypatch.setattr("app.routes._fetch_steamspy_tags", lambda app_id: [])
 
     metadata = routes_module._fetch_steam_metadata("789")
 
@@ -60,6 +61,43 @@ def test_fetch_steam_metadata_extracts_user_tags(monkeypatch):
     ]
     assert metadata["icon_url"] == "https://example.com/header.jpg"
     assert metadata["price"] == {"amount": 12.34, "currency": "USD"}
+
+
+def test_fetch_steam_metadata_uses_steamspy_fallback(monkeypatch):
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "321": {
+                    "success": True,
+                    "data": {
+                        "name": "Fallback Game",
+                        "genres": [{"description": "Indie"}],
+                        "short_description": "Fallback description.",
+                        "header_image": "https://example.com/cover.jpg",
+                    },
+                }
+            }
+
+    def fake_get(url, params, timeout):
+        return DummyResponse()
+
+    monkeypatch.setattr("app.routes.requests.get", fake_get)
+
+    fallback_called = {}
+
+    def fake_fetch_tags(app_id):
+        fallback_called["app_id"] = app_id
+        return ["Tag Alpha", "Tag Beta", "Tag Gamma"]
+
+    monkeypatch.setattr("app.routes._fetch_steamspy_tags", fake_fetch_tags)
+
+    metadata = routes_module._fetch_steam_metadata("321")
+
+    assert fallback_called["app_id"] == "321"
+    assert metadata["genres"] == ["Indie", "Tag Alpha", "Tag Beta", "Tag Gamma"]
 
 
 def test_refresh_game_metadata_updates_fields(monkeypatch, client, app_instance):
