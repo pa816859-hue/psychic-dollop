@@ -1979,12 +1979,22 @@ textarea:focus {
 .game-edit-price-group {
   display: grid;
   gap: 0.5rem;
-  grid-template-columns: minmax(0, 1fr) minmax(70px, auto);
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+  align-items: center;
 }
 
-.game-edit-price-group input[type="text"] {
-  text-transform: uppercase;
+.game-edit-price-prefix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.4rem;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-muted);
+  font-weight: 600;
   letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .game-edit-field--full {

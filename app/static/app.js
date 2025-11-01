@@ -3214,9 +3214,6 @@ async function initGameDetailPage() {
   const purchasePriceAmountInput = document.getElementById(
     "game-edit-purchase-price-amount"
   );
-  const purchasePriceCurrencyInput = document.getElementById(
-    "game-edit-purchase-price-currency"
-  );
   const startInput = document.getElementById("game-edit-start-date");
   const finishInput = document.getElementById("game-edit-finish-date");
   const thoughtsInput = document.getElementById("game-edit-thoughts");
@@ -3227,7 +3224,6 @@ async function initGameDetailPage() {
     status: statusSelect?.value || DEFAULT_STATUS,
     purchase: purchaseInput?.value || "",
     purchasePrice: purchasePriceAmountInput?.value || "",
-    purchasePriceCurrency: purchasePriceCurrencyInput?.value || "",
     start: startInput?.value || "",
     finish: finishInput?.value || "",
     thoughts: thoughtsInput?.value || "",
@@ -3254,8 +3250,6 @@ async function initGameDetailPage() {
     if (purchaseInput) purchaseInput.value = initialValues.purchase;
     if (purchasePriceAmountInput)
       purchasePriceAmountInput.value = initialValues.purchasePrice;
-    if (purchasePriceCurrencyInput)
-      purchasePriceCurrencyInput.value = initialValues.purchasePriceCurrency;
     if (startInput) startInput.value = initialValues.start;
     if (finishInput) finishInput.value = initialValues.finish;
     if (thoughtsInput) thoughtsInput.value = initialValues.thoughts;
@@ -3342,8 +3336,6 @@ async function initGameDetailPage() {
 
       const purchaseValue = purchaseInput?.value?.trim() || "";
       const purchasePriceValue = purchasePriceAmountInput?.value?.trim() || "";
-      const purchasePriceCurrencyValue =
-        purchasePriceCurrencyInput?.value?.trim() || "";
       const startValue = startInput?.value?.trim() || "";
       const finishValue = finishInput?.value?.trim() || "";
       const thoughtsValue = thoughtsInput?.value?.trim() || "";
@@ -3353,7 +3345,6 @@ async function initGameDetailPage() {
         status: statusSelect.value,
         purchase_date: purchaseValue || null,
         purchase_price_amount: purchasePriceValue ? Number(purchasePriceValue) : null,
-        purchase_price_currency: purchasePriceCurrencyValue || null,
         start_date: startValue || null,
         finish_date: finishValue || null,
         thoughts: thoughtsValue || null,
@@ -3374,7 +3365,6 @@ async function initGameDetailPage() {
         }
       } else {
         payload.purchase_price_amount = null;
-        payload.purchase_price_currency = null;
       }
 
       if (!statusRequiresPurchase(payload.status)) {

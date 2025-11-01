@@ -67,9 +67,13 @@
             value="{{ game.start_date.isoformat() if game.start_date }}"
           />
         </label>
+        {% set purchase_currency_display = (game.price_currency or game.purchase_price_currency or 'MYR') %}
         <label class="game-edit-field" for="game-edit-purchase-price-amount">
           <span class="game-edit-label">Purchase price</span>
           <div class="game-edit-price-group">
+            <span class="game-edit-price-prefix">
+              {{ purchase_currency_display }}
+            </span>
             <input
               id="game-edit-purchase-price-amount"
               name="purchase_price_amount"
@@ -78,17 +82,12 @@
               min="0"
               value="{{ '%.2f'|format(game.purchase_price_amount) if game.purchase_price_amount is not none }}"
               placeholder="0.00"
-            />
-            <input
-              id="game-edit-purchase-price-currency"
-              name="purchase_price_currency"
-              type="text"
-              maxlength="8"
-              value="{{ game.purchase_price_currency or game.price_currency or '' }}"
-              placeholder="MYR"
+              inputmode="decimal"
             />
           </div>
-          <small class="game-edit-hint">Leave blank to use the list price.</small>
+          <small class="game-edit-hint">
+            Currency matches the store price. Leave blank to use the list price.
+          </small>
         </label>
         <label class="game-edit-field" for="game-edit-finish-date">
           <span class="game-edit-label">Finished</span>

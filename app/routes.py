@@ -433,7 +433,7 @@ def _parse_price_input(
         currency_text = str(currency_value).strip().upper()
 
     if not currency_text and fallback_currency:
-        currency_text = fallback_currency.strip().upper()
+        currency_text = str(fallback_currency).strip().upper()
 
     if not currency_text:
         currency_text = "MYR"
@@ -1304,7 +1304,7 @@ def games_resource(game_id: int):
             "purchase_price_amount" in payload
             or "purchase_price_currency" in payload
         ):
-            fallback_currency = game.purchase_price_currency or game.price_currency
+            fallback_currency = game.price_currency or game.purchase_price_currency
             (
                 game.purchase_price_amount,
                 game.purchase_price_currency,
