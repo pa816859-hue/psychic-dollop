@@ -23,6 +23,7 @@ from .insights import (
     summarize_engagement_trend,
     summarize_genre_preferences,
     summarize_lifecycle_metrics,
+    summarize_price_insights,
 )
 from .models import Comparison, Game, SessionLog
 from .metrics import compute_weighted_sentiment
@@ -361,6 +362,12 @@ def insights_engagement_trend():
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
 
+    return jsonify(summary)
+
+
+@bp.route("/api/insights/pricing")
+def insights_pricing_summary():
+    summary = summarize_price_insights()
     return jsonify(summary)
 
 
