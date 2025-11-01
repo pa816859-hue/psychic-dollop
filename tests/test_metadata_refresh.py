@@ -39,17 +39,17 @@ def test_fetch_steam_metadata_extracts_user_tags(monkeypatch):
             }
 
     def fake_get(url, params, timeout):
-        captured["filters"] = params.get("filters")
-        captured["appids"] = params.get("appids")
+        captured["params"] = params.copy()
         return DummyResponse()
 
     monkeypatch.setattr("app.routes.requests.get", fake_get)
 
     metadata = routes_module._fetch_steam_metadata("789")
 
-    assert captured["appids"] == "789"
-    assert isinstance(captured.get("filters"), str)
-    assert "tags" in captured["filters"]
+    params = captured["params"]
+    assert params["appids"] == "789"
+    assert params["include_appinfo"] == 1
+    assert params["include_played_free_games"] == 1
     assert metadata["genres"][:2] == ["Action", "Adventure"]
     assert metadata["genres"][2:] == [
         "Tag One",

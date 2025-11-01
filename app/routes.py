@@ -48,6 +48,17 @@ LIBRARY_FILTER_KEYS = {
 }
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 class SteamMetadataError(Exception):
@@ -517,22 +528,16 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         return {"genres": [], "icon_url": None, "title": None, "short_description": None}
 
     url = "https://store.steampowered.com/api/appdetails"
+    params = {
+        "appids": app_id,
+        "cc": "my",
+        "l": "en",
+        "include_appinfo": 1,
+        "include_played_free_games": 1,
+    }
     try:
         steam_rate_limiter.wait()
-        response = requests.get(
-            url,
-            params={
-                "appids": app_id,
-                "cc": "my",
-                "l": "en",
-                "filters": (
-                    "genres,steamspy_tags,tags,user_defined_tags,price_overview,"
-                    "is_free,short_description,about_the_game,header_image,"
-                    "capsule_image,capsule_imagev5,img_icon_url,name"
-                ),
-            },
-            timeout=10,
-        )
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SteamMetadataError(f"Steam API request failed: {exc}", 502) from exc
@@ -610,13 +615,16 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         else None,
     }
 
-    logger.debug(
-        "Fetched Steam metadata for app %s: %s genres, %s tags, price=%s",
+    logger.info(
+        "Fetched Steam metadata for app %s: %s genres, %s tags, price=%s, icon=%s",
         app_id,
         len(genres),
         len(tags),
         metadata.get("price"),
+        bool(icon_url),
     )
+    if tags:
+        logger.debug("Top user tags for app %s: %s", app_id, tags)
 
     return metadata
 
@@ -635,9 +643,18 @@ def _apply_steam_metadata(
     if metadata is None:
         metadata = _fetch_steam_metadata(app_id)
 
-    game.genres = metadata.get("genres", [])
-    game.icon_url = metadata.get("icon_url")
-    game.short_description = metadata.get("short_description")
+    if "genres" in metadata and isinstance(metadata.get("genres"), list):
+        game.genres = metadata.get("genres") or []
+
+    icon_url = metadata.get("icon_url")
+    if icon_url:
+        game.icon_url = icon_url
+    elif icon_url is None and not game.icon_url:
+        game.icon_url = None
+
+    short_description = metadata.get("short_description")
+    if short_description is not None:
+        game.short_description = short_description
     price_info = metadata.get("price")
     if isinstance(price_info, dict) and price_info.get("amount") is not None:
         amount = price_info.get("amount")
