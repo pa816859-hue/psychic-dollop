@@ -402,6 +402,45 @@ def _parse_date_field(
         ) from exc
 
 
+def _parse_price_input(
+    amount_value,
+    currency_value,
+    label: str,
+    *,
+    fallback_currency: str | None = None,
+) -> tuple[float | None, str | None]:
+    if amount_value is None:
+        return None, None
+
+    if isinstance(amount_value, str):
+        amount_text = amount_value.strip()
+        if not amount_text:
+            return None, None
+        amount_value = amount_text
+
+    try:
+        amount = float(amount_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a valid number.") from exc
+
+    if amount < 0:
+        raise ValueError(f"{label} cannot be negative.")
+
+    currency_text = ""
+    if isinstance(currency_value, str):
+        currency_text = currency_value.strip().upper()
+    elif currency_value is not None:
+        currency_text = str(currency_value).strip().upper()
+
+    if not currency_text and fallback_currency:
+        currency_text = fallback_currency.strip().upper()
+
+    if not currency_text:
+        currency_text = "MYR"
+
+    return amount, currency_text
+
+
 def _validate_status(status: str | None) -> str:
     return validate_status(status)
 
@@ -746,6 +785,8 @@ def games_collection():
         steam_app_id = (payload.get("steam_app_id") or "").strip() or None
         modes = payload.get("modes") or []
         thoughts = (payload.get("thoughts") or "").strip() or None
+        raw_purchase_price_amount = payload.get("purchase_price_amount")
+        raw_purchase_price_currency = payload.get("purchase_price_currency")
 
         metadata = None
         if steam_app_id:
@@ -792,6 +833,19 @@ def games_collection():
             game.genres = []
             game.icon_url = None
             game.short_description = None
+
+        try:
+            (
+                game.purchase_price_amount,
+                game.purchase_price_currency,
+            ) = _parse_price_input(
+                raw_purchase_price_amount,
+                raw_purchase_price_currency,
+                "Purchase price",
+                fallback_currency=game.price_currency,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
 
         db.session.add(game)
         db.session.commit()
@@ -1245,6 +1299,21 @@ def games_resource(game_id: int):
             finish_date = _parse_date_field(payload.get("finish_date"), "Finish date")
         else:
             finish_date = game.finish_date
+
+        if (
+            "purchase_price_amount" in payload
+            or "purchase_price_currency" in payload
+        ):
+            fallback_currency = game.purchase_price_currency or game.price_currency
+            (
+                game.purchase_price_amount,
+                game.purchase_price_currency,
+            ) = _parse_price_input(
+                payload.get("purchase_price_amount"),
+                payload.get("purchase_price_currency"),
+                "Purchase price",
+                fallback_currency=fallback_currency,
+            )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 

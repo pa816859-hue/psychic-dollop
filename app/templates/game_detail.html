@@ -67,6 +67,29 @@
             value="{{ game.start_date.isoformat() if game.start_date }}"
           />
         </label>
+        <label class="game-edit-field" for="game-edit-purchase-price-amount">
+          <span class="game-edit-label">Purchase price</span>
+          <div class="game-edit-price-group">
+            <input
+              id="game-edit-purchase-price-amount"
+              name="purchase_price_amount"
+              type="number"
+              step="0.01"
+              min="0"
+              value="{{ '%.2f'|format(game.purchase_price_amount) if game.purchase_price_amount is not none }}"
+              placeholder="0.00"
+            />
+            <input
+              id="game-edit-purchase-price-currency"
+              name="purchase_price_currency"
+              type="text"
+              maxlength="8"
+              value="{{ game.purchase_price_currency or game.price_currency or '' }}"
+              placeholder="MYR"
+            />
+          </div>
+          <small class="game-edit-hint">Leave blank to use the list price.</small>
+        </label>
         <label class="game-edit-field" for="game-edit-finish-date">
           <span class="game-edit-label">Finished</span>
           <input
@@ -104,10 +127,37 @@
             {% endfor %}
           </div>
         {% endif %}
-        {% if game.price_amount is not none %}
-          <p class="game-detail-price">
-            Price: {{ (game.price_currency or 'MYR') }} {{ '%.2f'|format(game.price_amount) }}
-          </p>
+        {% set has_list_price = game.price_amount is not none %}
+        {% set has_purchase_price = game.purchase_price_amount is not none %}
+        {% if has_list_price or has_purchase_price %}
+          <div class="game-detail-prices">
+            {% if has_list_price %}
+              <p class="game-detail-price">
+                Store Price: {{ (game.price_currency or 'MYR') }} {{ '%.2f'|format(game.price_amount) }}
+              </p>
+            {% endif %}
+            {% if has_purchase_price %}
+              <p class="game-detail-price game-detail-price--purchase">
+                Purchase Price:
+                {{ (game.purchase_price_currency or game.price_currency or 'MYR') }}
+                {{ '%.2f'|format(game.purchase_price_amount) }}
+              </p>
+            {% endif %}
+            {% if has_list_price and has_purchase_price %}
+              {% set list_currency = game.price_currency or 'MYR' %}
+              {% set purchase_currency = game.purchase_price_currency or game.price_currency or 'MYR' %}
+              {% if list_currency == purchase_currency and game.price_amount > game.purchase_price_amount %}
+                {% set saved_amount = game.price_amount - game.purchase_price_amount %}
+                {% set saved_percent = (saved_amount / game.price_amount * 100.0) if game.price_amount else None %}
+                <p class="game-detail-price game-detail-price--savings">
+                  Saved {{ list_currency }} {{ '%.2f'|format(saved_amount) }}
+                  {% if saved_percent is not none %}
+                    ({{ '%.0f'|format(saved_percent) }}% off)
+                  {% endif %}
+                </p>
+              {% endif %}
+            {% endif %}
+          </div>
         {% endif %}
         {% if game.modes %}
           <div class="tag-list tag-list-inline">

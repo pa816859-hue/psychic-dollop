@@ -1967,13 +1967,24 @@ textarea:focus {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-.game-edit-field {
+.game-edit-field {  
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   color: var(--text-muted);
   text-transform: none;
   letter-spacing: 0.05em;
+}
+
+.game-edit-price-group {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr) minmax(70px, auto);
+}
+
+.game-edit-price-group input[type="text"] {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 .game-edit-field--full {
@@ -2454,10 +2465,23 @@ button.secondary:hover {
   gap: 1rem;
 }
 
+.game-detail-prices {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .game-detail-price {
   margin: 0;
   font-weight: 600;
   color: var(--accent);
+}
+
+.game-detail-price--purchase {
+  color: var(--text);
+}
+
+.game-detail-price--savings {
+  color: #7de3a0;
 }
 
 .game-detail-timeline {

@@ -147,6 +147,8 @@ def test_summarize_price_insights(app_instance):
             status="backlog",
             price_amount=150.0,
             price_currency="MYR",
+            purchase_price_amount=120.0,
+            purchase_price_currency="MYR",
             purchase_date=date(2023, 5, 1),
             elo_rating=1625,
         )
@@ -155,6 +157,8 @@ def test_summarize_price_insights(app_instance):
             status="full_clear",
             price_amount=90.0,
             price_currency="MYR",
+            purchase_price_amount=60.0,
+            purchase_price_currency="MYR",
             purchase_date=date(2023, 4, 12),
             start_date=date(2023, 4, 15),
             finish_date=date(2023, 5, 10),
@@ -217,14 +221,15 @@ def test_summarize_price_insights(app_instance):
     assert summary["primary_currency"] == "MYR"
 
     myr_totals = summary["currency_totals"]["MYR"]
-    assert myr_totals["owned_amount"] == pytest.approx(420.0)
-    assert myr_totals["backlog_amount"] == pytest.approx(150.0)
+    assert myr_totals["owned_amount"] == pytest.approx(360.0)
+    assert myr_totals["backlog_amount"] == pytest.approx(120.0)
     assert myr_totals["wishlist_amount"] == pytest.approx(95.0)
     assert myr_totals["average_tracked_hours"] == pytest.approx(5.38, rel=1e-3)
 
     backlog_watch = summary["backlog"]["most_expensive"]
     assert backlog_watch and backlog_watch[0]["title"] == "Chronicle Backlog"
     assert backlog_watch[0]["days_owned"] == 31
+    assert backlog_watch[0]["price"]["amount"] == pytest.approx(120.0)
     assert summary["backlog"]["total_priced"] == 1
 
     wishlist_high = summary["wishlist"]["highest_interest"]
@@ -233,12 +238,22 @@ def test_summarize_price_insights(app_instance):
 
     best_value = summary["value_for_money"]["MYR"]["best"]
     assert best_value and best_value[0]["title"] == "Triumph Saga"
-    expected_enjoyment = (600 / 60) / 90.0
+    expected_enjoyment = (600 / 60) / 60.0
     assert best_value[0]["enjoyment_per_cost"] == pytest.approx(expected_enjoyment, rel=1e-6)
 
     underutilized = summary["value_for_money"]["MYR"]["underutilized"]
     assert underutilized and underutilized[0]["title"] == "Slow Burn"
     assert underutilized[0]["cost_per_hour"] == pytest.approx(240.0)
+
+    savings = summary["savings"].get("MYR")
+    assert savings is not None
+    assert savings["total_saved"] == pytest.approx(60.0)
+    assert savings["discounted_count"] == 2
+    assert savings["average_discount_percent"] == pytest.approx(26.7, rel=1e-3)
+    top_deals = savings["top_deals"]
+    assert top_deals and top_deals[0]["title"] == "Triumph Saga"
+    assert top_deals[0]["saved_amount"] == pytest.approx(30.0)
+    assert top_deals[0]["purchase_price"]["amount"] == pytest.approx(60.0)
 
 
 def test_summarize_engagement_trend_detects_spikes(app_instance):
