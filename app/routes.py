@@ -11,6 +11,7 @@ from html import unescape
 from itertools import combinations
 from typing import Iterable, Tuple
 import re
+from difflib import SequenceMatcher
 
 import requests
 from flask import Blueprint, jsonify, render_template, request
@@ -92,6 +93,7 @@ class RateLimiter:
 
 steam_rate_limiter = RateLimiter(0.35)
 steamspy_rate_limiter = RateLimiter(1.0)
+hltb_rate_limiter = RateLimiter(1.0)
 
 
 @bp.route("/")
@@ -735,6 +737,143 @@ def _fetch_steam_metadata(app_id: str) -> dict:
     return metadata
 
 
+def _normalize_hltb_title(text: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "", text.casefold())
+    return normalized
+
+
+def _parse_hltb_hours(value) -> float | None:
+    if value in (None, ""):
+        return None
+
+    if isinstance(value, (int, float)):
+        hours = float(value)
+        return round(hours, 2) if hours > 0 else None
+
+    if isinstance(value, str):
+        normalized = value.replace(",", ".")
+        normalized = (
+            normalized.replace("½", ".5")
+            .replace("¼", ".25")
+            .replace("¾", ".75")
+            .replace("⅓", ".33")
+            .replace("⅔", ".66")
+        )
+        match = re.search(r"\d+(?:\.\d+)?", normalized)
+        if match:
+            hours = float(match.group(0))
+            return round(hours, 2) if hours > 0 else None
+    return None
+
+
+def _select_best_hltb_match(entries: list[dict], title: str) -> dict | None:
+    if not entries:
+        return None
+
+    target = _normalize_hltb_title(title)
+    if not target:
+        return None
+
+    best_entry = None
+    best_score = 0.0
+
+    for entry in entries:
+        name = entry.get("game_name")
+        if not name:
+            continue
+        candidate = _normalize_hltb_title(name)
+        if not candidate:
+            continue
+        if candidate == target:
+            return entry
+        score = SequenceMatcher(None, candidate, target).ratio()
+        if score > best_score:
+            best_entry = entry
+            best_score = score
+
+    if best_score >= 0.6:
+        return best_entry
+    return None
+
+
+def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
+    search_title = (title or "").strip()
+    if not search_title:
+        return None
+
+    search_terms = [term for term in re.split(r"\s+", search_title) if term]
+    if not search_terms:
+        return None
+
+    request_payload = {
+        "searchType": "games",
+        "searchTerms": search_terms,
+        "searchPage": 1,
+        "size": 20,
+        "searchOptions": {
+            "games": {
+                "userId": 0,
+                "platform": "",
+                "sortCategory": "popular",
+                "rangeCategory": "main",
+                "rangeTime": {"min": 0, "max": 0},
+                "gameplay": {"perspective": "", "flow": "", "genre": ""},
+                "modifier": "",
+            }
+        },
+        "filter": "",
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; psychic-dollop/1.0)",
+        "Referer": "https://howlongtobeat.com/",
+        "Origin": "https://howlongtobeat.com",
+    }
+
+    try:
+        hltb_rate_limiter.wait()
+        response = requests.post(
+            "https://howlongtobeat.com/api/search",
+            json=request_payload,
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Failed to fetch HowLongToBeat data for '%s': %s", search_title, exc)
+        return None
+
+    try:
+        response_payload = response.json()
+    except ValueError as exc:
+        logger.warning(
+            "Invalid HowLongToBeat response for '%s': %s",
+            search_title,
+            exc,
+        )
+        return None
+
+    entries = response_payload.get("data") if isinstance(response_payload, dict) else None
+    if not isinstance(entries, list):
+        return None
+
+    best_match = _select_best_hltb_match(entries, search_title)
+    if not best_match:
+        return None
+
+    main_hours = _parse_hltb_hours(best_match.get("gameplay_main"))
+    main_extra_hours = _parse_hltb_hours(best_match.get("gameplay_main_extra"))
+
+    if main_hours is None and main_extra_hours is None:
+        return None
+
+    return {
+        "title": best_match.get("game_name"),
+        "main_hours": main_hours,
+        "main_extra_hours": main_extra_hours,
+    }
+
+
 def _apply_steam_metadata(
     game: Game, app_id: str | None, metadata: dict | None = None
 ) -> None:
@@ -774,6 +913,18 @@ def _apply_steam_metadata(
         fetched_title = metadata.get("title")
         if fetched_title:
             game.title = fetched_title
+
+    hltb_title = metadata.get("title") if isinstance(metadata, dict) else None
+    if not hltb_title:
+        hltb_title = game.title
+
+    hltb_data = _fetch_howlongtobeat_data(hltb_title)
+    if hltb_data:
+        game.hltb_main_hours = hltb_data.get("main_hours")
+        game.hltb_main_extra_hours = hltb_data.get("main_extra_hours")
+    else:
+        game.hltb_main_hours = None
+        game.hltb_main_extra_hours = None
 
 
 @bp.route("/api/games", methods=["GET", "POST"])

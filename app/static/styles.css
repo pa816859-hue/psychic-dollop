@@ -2396,6 +2396,16 @@ button.secondary:hover {
   font-weight: 600;
 }
 
+.meta-hltb {
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.meta-hltb strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .empty-state {
   color: var(--text-muted);
   font-style: italic;

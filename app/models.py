@@ -28,6 +28,8 @@ class Game(db.Model):
     start_date = db.Column(db.Date, nullable=True)
     finish_date = db.Column(db.Date, nullable=True)
     thoughts = db.Column(db.Text, nullable=True)
+    hltb_main_hours = db.Column(db.Float, nullable=True)
+    hltb_main_extra_hours = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     def to_dict(self) -> dict:
@@ -61,6 +63,8 @@ class Game(db.Model):
             if self.finish_date
             else None,
             "thoughts": self.thoughts,
+            "hltb_main_hours": self.hltb_main_hours,
+            "hltb_main_extra_hours": self.hltb_main_extra_hours,
             "created_at": self.created_at.isoformat(),
         }
 
