@@ -305,6 +305,19 @@ function formatPrice(priceInfo) {
   }
 }
 
+function formatHowLongToBeatHours(hours) {
+  if (typeof hours !== "number" || Number.isNaN(hours) || hours <= 0) {
+    return null;
+  }
+  const totalMinutes = Math.round(hours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) {
+    return `${wholeHours}h`;
+  }
+  return `${wholeHours}h ${minutes}m`;
+}
+
 async function fetchAndCacheGames({ force = false } = {}) {
   if (!force && state.cachedGames.length > 0) {
     return state.cachedGames;
@@ -2647,6 +2660,22 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
     genres.className = "tag-list";
     genres.innerHTML = buildTagElements(game.genres);
     li.appendChild(genres);
+  }
+
+  const hltbMain = formatHowLongToBeatHours(game.hltb_main_hours);
+  const hltbExtra = formatHowLongToBeatHours(game.hltb_main_extra_hours);
+  if (hltbMain || hltbExtra) {
+    const hltb = document.createElement("div");
+    hltb.className = "meta meta-hltb";
+    const segments = [];
+    if (hltbMain) {
+      segments.push(`<strong>Main:</strong> ${hltbMain}`);
+    }
+    if (hltbExtra) {
+      segments.push(`<strong>Main + Sides:</strong> ${hltbExtra}`);
+    }
+    hltb.innerHTML = `<strong>HowLongToBeat:</strong> ${segments.join(" · ")}`;
+    li.appendChild(hltb);
   }
 
   const timelineRows = [];

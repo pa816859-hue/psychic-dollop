@@ -41,6 +41,8 @@ def _ensure_game_columns() -> None:
         "price_currency": "VARCHAR(8)",
         "purchase_price_amount": "REAL",
         "purchase_price_currency": "VARCHAR(8)",
+        "hltb_main_hours": "REAL",
+        "hltb_main_extra_hours": "REAL",
     }
 
     added = False
