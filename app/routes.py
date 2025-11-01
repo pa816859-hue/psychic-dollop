@@ -9,9 +9,11 @@ import time
 from datetime import date, datetime, timedelta
 from html import unescape
 from itertools import combinations
-from typing import Iterable, Tuple
+from typing import Iterable, NamedTuple, Tuple
 import re
 from difflib import SequenceMatcher
+
+from urllib.parse import urljoin
 
 import requests
 from flask import Blueprint, jsonify, render_template, request
@@ -94,6 +96,17 @@ class RateLimiter:
 steam_rate_limiter = RateLimiter(0.35)
 steamspy_rate_limiter = RateLimiter(1.0)
 hltb_rate_limiter = RateLimiter(1.0)
+
+
+class _HowLongToBeatSearchInfo(NamedTuple):
+    endpoint: str
+    api_key: str
+
+
+_HLTB_BASE_URL = "https://howlongtobeat.com/"
+_HLTB_SEARCH_CACHE: _HowLongToBeatSearchInfo | None = None
+_HLTB_SEARCH_CACHE_EXPIRY = 0.0
+_HLTB_SEARCH_CACHE_TTL = 60 * 60 * 6  # 6 hours
 
 
 @bp.route("/")
@@ -801,16 +814,108 @@ def _select_best_hltb_match(entries: list[dict], title: str) -> dict | None:
     return None
 
 
-def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
-    search_title = (title or "").strip()
-    if not search_title:
+def _reset_hltb_search_cache() -> None:
+    global _HLTB_SEARCH_CACHE, _HLTB_SEARCH_CACHE_EXPIRY
+    _HLTB_SEARCH_CACHE = None
+    _HLTB_SEARCH_CACHE_EXPIRY = 0.0
+
+
+def _extract_hltb_api_key(script_text: str) -> str | None:
+    key_match = re.search(r"users\s*:\s*{\s*id\s*:\s*\"([^\"]+)\"", script_text)
+    if key_match:
+        return key_match.group(1)
+
+    concatenated = re.findall(r"\.concat\(\s*[\"']([^\"']+)[\"']\s*\)", script_text)
+    if concatenated:
+        candidate = "".join(concatenated)
+        if candidate:
+            return candidate
+    return None
+
+
+def _extract_hltb_endpoint_path(script_text: str) -> str | None:
+    cleaned = script_text.replace("\\u002F", "/")
+    fetch_matches = re.findall(
+        r"fetch\(\s*[\"'](/api/[^\"']*)[\"']",
+        cleaned,
+    )
+    if not fetch_matches:
         return None
 
-    search_terms = [term for term in re.split(r"\s+", search_title) if term]
-    if not search_terms:
+    for path in fetch_matches:
+        if "/api/s/" in path:
+            return path
+    return fetch_matches[0]
+
+
+def _scrape_hltb_search_info(headers: dict[str, str]) -> _HowLongToBeatSearchInfo | None:
+    try:
+        hltb_rate_limiter.wait()
+        landing = requests.get(_HLTB_BASE_URL, headers=headers, timeout=10)
+        landing.raise_for_status()
+    except requests.RequestException as exc:
+        logger.debug("Unable to load HowLongToBeat landing page: %s", exc)
         return None
 
-    request_payload = {
+    script_sources = re.findall(r"<script[^>]+src=[\"']([^\"']+)[\"']", landing.text or "")
+    prioritized = [src for src in script_sources if "_app-" in src] or script_sources
+
+    for src in prioritized:
+        script_url = urljoin(_HLTB_BASE_URL, src)
+        try:
+            hltb_rate_limiter.wait()
+            script = requests.get(script_url, headers=headers, timeout=10)
+            script.raise_for_status()
+        except requests.RequestException as exc:
+            logger.debug("Unable to load HowLongToBeat script %s: %s", script_url, exc)
+            continue
+
+        script_text = script.text or ""
+        api_key = _extract_hltb_api_key(script_text)
+        endpoint_path = _extract_hltb_endpoint_path(script_text)
+        if api_key and endpoint_path:
+            endpoint = urljoin(_HLTB_BASE_URL, endpoint_path.lstrip("/"))
+            if not endpoint.endswith("/"):
+                endpoint = f"{endpoint}/"
+            return _HowLongToBeatSearchInfo(endpoint=endpoint, api_key=api_key)
+
+    return None
+
+
+def _get_hltb_search_info(force_refresh: bool = False) -> _HowLongToBeatSearchInfo | None:
+    global _HLTB_SEARCH_CACHE, _HLTB_SEARCH_CACHE_EXPIRY
+
+    now = time.monotonic()
+    if (
+        not force_refresh
+        and _HLTB_SEARCH_CACHE is not None
+        and now < _HLTB_SEARCH_CACHE_EXPIRY
+    ):
+        return _HLTB_SEARCH_CACHE
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; psychic-dollop/1.0)",
+        "Referer": _HLTB_BASE_URL,
+        "Origin": _HLTB_BASE_URL.rstrip("/"),
+    }
+
+    search_info = _scrape_hltb_search_info(headers)
+    if search_info is None:
+        if force_refresh:
+            _reset_hltb_search_cache()
+        return None
+
+    _HLTB_SEARCH_CACHE = search_info
+    _HLTB_SEARCH_CACHE_EXPIRY = now + _HLTB_SEARCH_CACHE_TTL
+    return search_info
+
+
+def _build_hltb_payload(
+    search_terms: list[str],
+    include_user_key: bool = False,
+    api_key: str | None = None,
+) -> dict:
+    payload = {
         "searchType": "games",
         "searchTerms": search_terms,
         "searchPage": 1,
@@ -822,34 +927,101 @@ def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
                 "sortCategory": "popular",
                 "rangeCategory": "main",
                 "rangeTime": {"min": 0, "max": 0},
-                "gameplay": {"perspective": "", "flow": "", "genre": ""},
+                "gameplay": {
+                    "perspective": "",
+                    "flow": "",
+                    "genre": "",
+                    "difficulty": "",
+                },
+                "rangeYear": {"min": "", "max": ""},
                 "modifier": "",
-            }
+            },
+            "users": {"sortCategory": "postcount"},
+            "lists": {"sortCategory": "follows"},
+            "filter": "",
+            "sort": 0,
+            "randomizer": 0,
         },
-        "filter": "",
+        "useCache": True,
     }
+
+    if include_user_key and api_key:
+        payload["searchOptions"]["users"]["id"] = api_key
+
+    return payload
+
+
+def _append_hltb_key(endpoint: str, api_key: str) -> str:
+    if not endpoint.endswith("/"):
+        endpoint = f"{endpoint}/"
+    return f"{endpoint}{api_key}"
+
+
+def _build_hltb_endpoints(
+    search_terms: list[str],
+    search_info: _HowLongToBeatSearchInfo | None,
+) -> list[tuple[str, dict, bool]]:
+    attempts: list[tuple[str, dict, bool]] = []
+
+    if search_info is not None and search_info.api_key:
+        attempts.append(
+            (
+                _append_hltb_key(search_info.endpoint, search_info.api_key),
+                _build_hltb_payload(search_terms),
+                True,
+            )
+        )
+        attempts.append(
+            (
+                search_info.endpoint,
+                _build_hltb_payload(
+                    search_terms,
+                    include_user_key=True,
+                    api_key=search_info.api_key,
+                ),
+                True,
+            )
+        )
+
+    fallback_payload = _build_hltb_payload(search_terms)
+    attempts.append((f"{_HLTB_BASE_URL}api/search", fallback_payload, False))
+    attempts.append((f"{_HLTB_BASE_URL}api/v1/search", _build_hltb_payload(search_terms), False))
+    return attempts
+
+
+def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
+    search_title = (title or "").strip()
+    if not search_title:
+        return None
+
+    search_terms = [term for term in re.split(r"\s+", search_title) if term]
+    if not search_terms:
+        return None
 
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; psychic-dollop/1.0)",
-        "Referer": "https://howlongtobeat.com/",
-        "Origin": "https://howlongtobeat.com",
+        "Referer": _HLTB_BASE_URL,
+        "Origin": _HLTB_BASE_URL.rstrip("/"),
     }
 
-    endpoints: tuple[str, ...] = (
-        "https://howlongtobeat.com/api/search",
-        "https://howlongtobeat.com/api/v1/search",
-    )
+    search_info = _get_hltb_search_info()
+    attempts = _build_hltb_endpoints(search_terms, search_info)
 
     last_error: Exception | None = None
     response = None
     success = False
+    refreshed_once = False
+    attempt_index = 0
 
-    for endpoint in endpoints:
+    while attempt_index < len(attempts):
+        endpoint, payload, uses_search_info = attempts[attempt_index]
+        attempt_index += 1
+
         try:
             hltb_rate_limiter.wait()
             response = requests.post(
                 endpoint,
-                json=request_payload,
+                json=payload,
                 headers=headers,
                 timeout=10,
             )
@@ -868,6 +1040,14 @@ def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
                 endpoint,
                 search_title,
             )
+            if uses_search_info and not refreshed_once:
+                refreshed_info = _get_hltb_search_info(force_refresh=True)
+                refreshed_once = True
+                if refreshed_info is not None:
+                    search_info = refreshed_info
+                    attempts = _build_hltb_endpoints(search_terms, search_info)
+                    attempt_index = 0
+                    continue
             continue
 
         try:
