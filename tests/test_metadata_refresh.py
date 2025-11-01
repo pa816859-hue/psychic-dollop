@@ -115,12 +115,18 @@ def test_refresh_game_metadata_updates_fields(monkeypatch, client, app_instance)
         }
 
     monkeypatch.setattr("app.routes._fetch_steam_metadata", fake_fetch)
+    monkeypatch.setattr(
+        "app.routes._fetch_howlongtobeat_data",
+        lambda title: {"main_hours": 12.0, "main_extra_hours": 18.5},
+    )
 
     response = client.post(f"/api/games/{game_id}/refresh")
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["game"]["price_amount"] == 89.99
     assert payload["game"]["price_currency"] == "MYR"
+    assert payload["game"]["hltb_main_hours"] == 12.0
+    assert payload["game"]["hltb_main_extra_hours"] == 18.5
 
     with app_instance.app_context():
         refreshed = Game.query.get(game_id)
@@ -129,6 +135,8 @@ def test_refresh_game_metadata_updates_fields(monkeypatch, client, app_instance)
         assert refreshed.price_amount == 89.99
         assert refreshed.price_currency == "MYR"
         assert "Adventure" in refreshed.genres
+        assert refreshed.hltb_main_hours == 12.0
+        assert refreshed.hltb_main_extra_hours == 18.5
 
 
 def test_refresh_game_metadata_requires_app_id(client, app_instance):
@@ -156,6 +164,10 @@ def test_refresh_library_status_metadata_handles_errors(monkeypatch, client, app
         }
 
     monkeypatch.setattr("app.routes._fetch_steam_metadata", fake_fetch)
+    monkeypatch.setattr(
+        "app.routes._fetch_howlongtobeat_data",
+        lambda title: {"main_hours": 7.25, "main_extra_hours": 10.5},
+    )
 
     response = client.post("/api/library/wishlist/refresh")
     assert response.status_code == 200
@@ -170,3 +182,67 @@ def test_refresh_library_status_metadata_handles_errors(monkeypatch, client, app
         assert success.price_currency == "MYR"
         assert failure.price_amount is None
         assert failure.price_currency is None
+        assert success.hltb_main_hours == 7.25
+        assert success.hltb_main_extra_hours == 10.5
+        assert failure.hltb_main_hours is None
+        assert failure.hltb_main_extra_hours is None
+
+
+def test_create_game_without_steam_fetches_hltb(monkeypatch, client, app_instance):
+    captured = {}
+
+    def fake_fetch(title):
+        captured["title"] = title
+        return {"main_hours": 5.5, "main_extra_hours": 8.75}
+
+    monkeypatch.setattr("app.routes._fetch_howlongtobeat_data", fake_fetch)
+
+    response = client.post(
+        "/api/games",
+        json={
+            "title": "No Steam Game",
+            "status": "wishlist",
+            "steam_app_id": None,
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert captured["title"] == "No Steam Game"
+    assert payload["hltb_main_hours"] == 5.5
+    assert payload["hltb_main_extra_hours"] == 8.75
+
+    with app_instance.app_context():
+        stored = Game.query.filter_by(title="No Steam Game").first()
+        assert stored is not None
+        assert stored.hltb_main_hours == 5.5
+        assert stored.hltb_main_extra_hours == 8.75
+
+
+def test_update_game_without_refresh_updates_hltb(monkeypatch, client, app_instance):
+    with app_instance.app_context():
+        game_id = _create_game(title="Sample", status="wishlist", steam_app_id=None)
+
+    calls: list[str] = []
+
+    def fake_fetch(title):
+        calls.append(title)
+        return {"main_hours": 9.0, "main_extra_hours": 14.0}
+
+    monkeypatch.setattr("app.routes._fetch_howlongtobeat_data", fake_fetch)
+
+    response = client.put(
+        f"/api/games/{game_id}",
+        json={
+            "title": "Sample Deluxe",
+            "status": "wishlist",
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["Sample Deluxe"]
+
+    with app_instance.app_context():
+        refreshed = Game.query.get(game_id)
+        assert refreshed.hltb_main_hours == 9.0
+        assert refreshed.hltb_main_extra_hours == 14.0
