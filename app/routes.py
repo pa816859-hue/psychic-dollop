@@ -835,17 +835,59 @@ def _fetch_howlongtobeat_data(title: str | None) -> dict | None:
         "Origin": "https://howlongtobeat.com",
     }
 
-    try:
-        hltb_rate_limiter.wait()
-        response = requests.post(
-            "https://howlongtobeat.com/api/search",
-            json=request_payload,
-            headers=headers,
-            timeout=10,
+    endpoints: tuple[str, ...] = (
+        "https://howlongtobeat.com/api/search",
+        "https://howlongtobeat.com/api/v1/search",
+    )
+
+    last_error: Exception | None = None
+    response = None
+    success = False
+
+    for endpoint in endpoints:
+        try:
+            hltb_rate_limiter.wait()
+            response = requests.post(
+                endpoint,
+                json=request_payload,
+                headers=headers,
+                timeout=10,
+            )
+        except requests.RequestException as exc:  # pragma: no cover - network failure
+            last_error = exc
+            response = None
+            break
+
+        if response.status_code == 404:
+            last_error = requests.HTTPError(
+                f"404 Client Error: Not Found for url: {endpoint}",
+                response=response,
+            )
+            logger.info(
+                "HowLongToBeat search endpoint '%s' returned 404 for '%s', trying fallback",
+                endpoint,
+                search_title,
+            )
+            continue
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:  # pragma: no cover - unexpected status
+            last_error = exc
+            response = None
+            break
+
+        last_error = None
+        success = True
+        break
+
+    if not success:
+        message = last_error or "No HowLongToBeat endpoints responded successfully"
+        logger.warning(
+            "Failed to fetch HowLongToBeat data for '%s': %s",
+            search_title,
+            message,
         )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        logger.warning("Failed to fetch HowLongToBeat data for '%s': %s", search_title, exc)
         return None
 
     try:
