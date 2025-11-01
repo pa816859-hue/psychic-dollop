@@ -185,6 +185,19 @@
             </div>
           {% endif %}
         </dl>
+        {% if hltb_display.main or hltb_display.main_extra %}
+          <div class="game-detail-hltb">
+            <h3>HowLongToBeat</h3>
+            <ul>
+              {% if hltb_display.main %}
+                <li><strong>Main:</strong> {{ hltb_display.main }}</li>
+              {% endif %}
+              {% if hltb_display.main_extra %}
+                <li><strong>Main + Sides:</strong> {{ hltb_display.main_extra }}</li>
+              {% endif %}
+            </ul>
+          </div>
+        {% endif %}
       </div>
     </div>
     <div class="game-detail-metrics">
