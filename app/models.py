@@ -20,6 +20,8 @@ class Game(db.Model):
     icon_url = db.Column(db.String(512), nullable=True)
     short_description = db.Column(db.Text, nullable=True)
     elo_rating = db.Column(db.Float, nullable=False, default=1500.0)
+    price_amount = db.Column(db.Float, nullable=True)
+    price_currency = db.Column(db.String(8), nullable=True)
     purchase_date = db.Column(db.Date, nullable=True)
     start_date = db.Column(db.Date, nullable=True)
     finish_date = db.Column(db.Date, nullable=True)
@@ -36,6 +38,9 @@ class Game(db.Model):
             "steam_app_id": self.steam_app_id,
             "icon_url": self.icon_url,
             "short_description": self.short_description,
+            "price_amount": self.price_amount,
+            "price_currency":
+            (self.price_currency or "MYR") if self.price_amount is not None else None,
             "elo_rating": self.elo_rating,
             "purchase_date": self.purchase_date.isoformat()
             if self.purchase_date

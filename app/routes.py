@@ -48,6 +48,17 @@ LIBRARY_FILTER_KEYS = {
 }
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            "%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 class SteamMetadataError(Exception):
@@ -79,6 +90,7 @@ class RateLimiter:
 
 
 steam_rate_limiter = RateLimiter(0.35)
+steamspy_rate_limiter = RateLimiter(1.0)
 
 
 @bp.route("/")
@@ -459,15 +471,133 @@ def _search_steam_app_id(title: str) -> str | None:
     return fallback
 
 
+def _sanitize_tag_name(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _fetch_steamspy_tags(app_id: str) -> list[str]:
+    app_id = (app_id or "").strip()
+    if not app_id:
+        return []
+
+    url = "https://steamspy.com/api.php"
+    params = {"request": "appdetails", "appid": app_id}
+
+    try:
+        steamspy_rate_limiter.wait()
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("SteamSpy tag fetch failed for app %s: %s", app_id, exc)
+        return []
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.warning("SteamSpy returned invalid JSON for app %s: %s", app_id, exc)
+        return []
+
+    tags_field = payload.get("tags")
+    if not isinstance(tags_field, dict):
+        return []
+
+    sorted_items = sorted(
+        ((name or "", weight or 0) for name, weight in tags_field.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    tags: list[str] = []
+    seen: set[str] = set()
+    for name, _weight in sorted_items:
+        sanitized = _sanitize_tag_name(name)
+        if not sanitized:
+            continue
+        normalized = sanitized.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        tags.append(sanitized)
+        if len(tags) >= 10:
+            break
+
+    if tags:
+        logger.info("Fetched %s SteamSpy tags for app %s", len(tags), app_id)
+        logger.debug("SteamSpy tags for app %s: %s", app_id, tags)
+
+    return tags
+
+
+def _extract_user_tags(data: dict, app_id: str | None = None) -> list[str]:
+    tags: list[str] = []
+    seen: set[str] = set()
+
+    def add_tag(name: str | None) -> bool:
+        normalized = (_sanitize_tag_name(name) or "").casefold()
+        if not normalized or normalized in seen:
+            return False
+        seen.add(normalized)
+        tags.append(_sanitize_tag_name(name) or "")
+        return len(tags) >= 10
+
+    def from_sequence(values: Iterable[str]) -> bool:
+        for value in values:
+            if add_tag(value):
+                return True
+        return False
+
+    def from_mapping(values: dict[str, int | float | None]) -> bool:
+        sorted_items = sorted(
+            ((key or "", weight or 0) for key, weight in values.items()),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+        return from_sequence(name for name, _ in sorted_items)
+
+    raw_user_tags = data.get("user_defined_tags")
+    if isinstance(raw_user_tags, list) and from_sequence(raw_user_tags):
+        return tags
+
+    steamspy_tags = data.get("steamspy_tags")
+    if isinstance(steamspy_tags, dict) and from_mapping(steamspy_tags):
+        return tags
+    if isinstance(steamspy_tags, list) and from_sequence(steamspy_tags):
+        return tags
+
+    raw_tags = data.get("tags")
+    if isinstance(raw_tags, dict):
+        from_mapping(raw_tags)
+    elif isinstance(raw_tags, list):
+        from_sequence(raw_tags)
+
+    if app_id and len(tags) < 10:
+        fallback_tags = _fetch_steamspy_tags(app_id)
+        for name in fallback_tags:
+            if add_tag(name):
+                break
+
+    return tags
+
+
 def _fetch_steam_metadata(app_id: str) -> dict:
     app_id = (app_id or "").strip()
     if not app_id:
         return {"genres": [], "icon_url": None, "title": None, "short_description": None}
 
     url = "https://store.steampowered.com/api/appdetails"
+    params = {
+        "appids": app_id,
+        "cc": "my",
+        "l": "en",
+        "include_appinfo": 1,
+        "include_played_free_games": 1,
+    }
     try:
         steam_rate_limiter.wait()
-        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SteamMetadataError(f"Steam API request failed: {exc}", 502) from exc
@@ -491,6 +621,17 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         if description:
             genres.append(description)
 
+    tags = _extract_user_tags(data, app_id)
+
+    combined_genres: list[str] = []
+    seen: set[str] = set()
+    for name in [*genres, *tags]:
+        normalized = name.casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        combined_genres.append(name)
+
     icon_url = (
         data.get("header_image")
         or data.get("capsule_image")
@@ -509,12 +650,43 @@ def _fetch_steam_metadata(app_id: str) -> dict:
         data.get("short_description") or data.get("about_the_game")
     )
 
-    return {
-        "genres": genres,
+    price_amount: float | None = None
+    price_currency: str | None = None
+    price_overview = data.get("price_overview")
+    if isinstance(price_overview, dict):
+        raw_amount = price_overview.get("initial") or price_overview.get("final")
+        if isinstance(raw_amount, (int, float)):
+            price_amount = round(float(raw_amount) / 100, 2)
+            price_currency = (price_overview.get("currency") or "MYR").upper()
+    elif data.get("is_free"):
+        price_amount = 0.0
+        price_currency = "MYR"
+
+    metadata = {
+        "genres": combined_genres,
         "icon_url": icon_url,
         "title": title,
         "short_description": short_description,
+        "price": {
+            "amount": price_amount,
+            "currency": price_currency,
+        }
+        if price_amount is not None
+        else None,
     }
+
+    logger.info(
+        "Fetched Steam metadata for app %s: %s genres, %s tags, price=%s, icon=%s",
+        app_id,
+        len(genres),
+        len(tags),
+        metadata.get("price"),
+        bool(icon_url),
+    )
+    if tags:
+        logger.debug("Top user tags for app %s: %s", app_id, tags)
+
+    return metadata
 
 
 def _apply_steam_metadata(
@@ -524,14 +696,34 @@ def _apply_steam_metadata(
         game.genres = []
         game.icon_url = None
         game.short_description = None
+        game.price_amount = None
+        game.price_currency = None
         return
 
     if metadata is None:
         metadata = _fetch_steam_metadata(app_id)
 
-    game.genres = metadata.get("genres", [])
-    game.icon_url = metadata.get("icon_url")
-    game.short_description = metadata.get("short_description")
+    if "genres" in metadata and isinstance(metadata.get("genres"), list):
+        game.genres = metadata.get("genres") or []
+
+    icon_url = metadata.get("icon_url")
+    if icon_url:
+        game.icon_url = icon_url
+    elif icon_url is None and not game.icon_url:
+        game.icon_url = None
+
+    short_description = metadata.get("short_description")
+    if short_description is not None:
+        game.short_description = short_description
+    price_info = metadata.get("price")
+    if isinstance(price_info, dict) and price_info.get("amount") is not None:
+        amount = price_info.get("amount")
+        game.price_amount = float(amount)
+        currency = price_info.get("currency") or "MYR"
+        game.price_currency = currency.upper()
+    else:
+        game.price_amount = None
+        game.price_currency = None
     if not game.title:
         fetched_title = metadata.get("title")
         if fetched_title:
@@ -1069,6 +1261,7 @@ def games_resource(game_id: int):
             or not game.genres
             or not game.icon_url
             or not game.short_description
+            or game.price_amount is None
         )
         if should_refresh:
             try:
@@ -1083,6 +1276,98 @@ def games_resource(game_id: int):
     db.session.commit()
 
     return jsonify(game.to_dict())
+
+
+@bp.route("/api/games/<int:game_id>/refresh", methods=["POST"])
+def refresh_game_metadata(game_id: int):
+    game = Game.query.get_or_404(game_id)
+    if not game.steam_app_id:
+        return jsonify({"error": "This game does not have a Steam App ID."}), 400
+
+    logger.info(
+        "Refreshing Steam metadata for game %s (id=%s, app_id=%s)",
+        game.title,
+        game.id,
+        game.steam_app_id,
+    )
+
+    try:
+        metadata = _fetch_steam_metadata(game.steam_app_id)
+    except SteamMetadataError as exc:
+        logger.error(
+            "Failed to refresh Steam metadata for game %s (id=%s, app_id=%s): %s",
+            game.title,
+            game.id,
+            game.steam_app_id,
+            exc,
+        )
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    _apply_steam_metadata(game, game.steam_app_id, metadata)
+    db.session.commit()
+
+    logger.info(
+        "Updated Steam metadata for game %s (id=%s): %s genres, price=%s",
+        game.title,
+        game.id,
+        len(game.genres or []),
+        (
+            f"{game.price_currency or 'MYR'} {game.price_amount:.2f}"
+            if game.price_amount is not None
+            else "unavailable"
+        ),
+    )
+
+    return jsonify({"game": game.to_dict()})
+
+
+@bp.route("/api/library/<status>/refresh", methods=["POST"])
+def refresh_library_status_metadata(status: str):
+    normalized_status = normalize_status_value(status)
+    if normalized_status not in STATUS_VALUES:
+        return jsonify({"error": "Unknown library status."}), 404
+
+    games = (
+        Game.query.filter(Game.status == normalized_status)
+        .filter(Game.steam_app_id.isnot(None))
+        .all()
+    )
+
+    if not games:
+        return jsonify({"updated": 0, "errors": [], "requested_status": normalized_status})
+
+    updated = 0
+    errors: list[dict] = []
+
+    for game in games:
+        try:
+            metadata = _fetch_steam_metadata(game.steam_app_id)
+        except SteamMetadataError as exc:
+            errors.append(
+                {
+                    "id": game.id,
+                    "title": game.title,
+                    "steam_app_id": game.steam_app_id,
+                    "error": str(exc),
+                }
+            )
+            continue
+
+        _apply_steam_metadata(game, game.steam_app_id, metadata)
+        updated += 1
+
+    if updated:
+        db.session.commit()
+    else:
+        db.session.rollback()
+
+    return jsonify(
+        {
+            "requested_status": normalized_status,
+            "updated": updated,
+            "errors": errors,
+        }
+    )
 
 
 def _interpolate_color(color_a: tuple[int, int, int], color_b: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
@@ -1293,7 +1578,9 @@ def delete_session(session_id: int):
 def steam_lookup(app_id: str):
     url = "https://store.steampowered.com/api/appdetails"
     try:
-        response = requests.get(url, params={"appids": app_id}, timeout=10)
+        response = requests.get(
+            url, params={"appids": app_id, "cc": "my", "l": "en"}, timeout=10
+        )
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:

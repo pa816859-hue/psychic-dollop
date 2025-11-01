@@ -230,6 +230,55 @@ function formatDaysRange(lower, upper) {
   return `${minValue} – ${maxValue} days`;
 }
 
+function getPriceInfo(game) {
+  if (!game || typeof game !== "object") {
+    return null;
+  }
+
+  if (typeof game.price_amount === "number") {
+    return {
+      amount: Number(game.price_amount),
+      currency:
+        typeof game.price_currency === "string" && game.price_currency.trim()
+          ? game.price_currency.trim().toUpperCase()
+          : "MYR",
+    };
+  }
+
+  const nestedPrice = game.price;
+  if (nestedPrice && typeof nestedPrice === "object") {
+    const amount = Number(nestedPrice.amount);
+    if (Number.isFinite(amount)) {
+      const currency =
+        typeof nestedPrice.currency === "string" && nestedPrice.currency.trim()
+          ? nestedPrice.currency.trim().toUpperCase()
+          : "MYR";
+      return { amount, currency };
+    }
+  }
+
+  return null;
+}
+
+function formatPrice(priceInfo) {
+  if (!priceInfo) return null;
+  const amount = Number(priceInfo.amount);
+  if (!Number.isFinite(amount)) return null;
+  const currency = priceInfo.currency || "MYR";
+
+  try {
+    return new Intl.NumberFormat("en-MY", {
+      style: "currency",
+      currency,
+      currencyDisplay: "symbol",
+      minimumFractionDigits: 2,
+    }).format(amount);
+  } catch (error) {
+    const prefix = currency === "MYR" ? "RM" : currency;
+    return `${prefix} ${amount.toFixed(2)}`;
+  }
+}
+
 async function fetchAndCacheGames({ force = false } = {}) {
   if (!force && state.cachedGames.length > 0) {
     return state.cachedGames;
@@ -2099,6 +2148,15 @@ function createGameCard(game, { onDelete, onUpdate } = {}) {
   rating.textContent = `ELO: ${Math.round(game.elo_rating)}`;
   li.appendChild(rating);
 
+  const priceInfo = getPriceInfo(game);
+  const priceLabel = formatPrice(priceInfo);
+  if (priceLabel) {
+    const price = document.createElement("div");
+    price.className = "meta game-card-price";
+    price.textContent = priceLabel;
+    li.appendChild(price);
+  }
+
   if (Array.isArray(game.modes) && game.modes.length > 0) {
     const modes = document.createElement("div");
     modes.className = "tag-list";
@@ -2669,6 +2727,8 @@ async function initGameDetailPage() {
   const editMessage = document.getElementById("game-edit-message");
   const editCancel = document.getElementById("game-edit-cancel");
   const deleteButton = document.getElementById("game-delete-button");
+  const refreshButton = document.getElementById("game-refresh-metadata");
+  const refreshMessage = document.getElementById("game-refresh-message");
   const titleInput = document.getElementById("game-edit-title");
   const statusSelect = document.getElementById("game-edit-status");
   const purchaseInput = document.getElementById("game-edit-purchase-date");
@@ -2751,6 +2811,36 @@ async function initGameDetailPage() {
       } catch (error) {
         deleteButton.disabled = false;
         alert(error instanceof Error ? error.message : String(error));
+      }
+    });
+  }
+
+  if (refreshButton && !refreshButton.disabled) {
+    refreshButton.addEventListener("click", async () => {
+      const originalLabel = refreshButton.textContent;
+      refreshButton.disabled = true;
+      refreshButton.textContent = "Refreshing...";
+      if (refreshMessage) {
+        refreshMessage.classList.remove("is-error");
+        refreshMessage.textContent = "Refreshing Steam metadata...";
+      }
+
+      try {
+        await fetchJSON(`/api/games/${gameId}/refresh`, { method: "POST" });
+        if (refreshMessage) {
+          refreshMessage.textContent = "Steam metadata updated. Refreshing...";
+        }
+        setTimeout(() => {
+          window.location.reload();
+        }, 600);
+      } catch (error) {
+        if (refreshMessage) {
+          refreshMessage.classList.add("is-error");
+          refreshMessage.textContent =
+            error instanceof Error ? error.message : String(error);
+        }
+        refreshButton.disabled = false;
+        refreshButton.textContent = originalLabel;
       }
     });
   }
@@ -2907,6 +2997,10 @@ async function initLibraryPage() {
   const searchInput = document.getElementById("library-search");
   const searchClear = document.getElementById("library-search-clear");
   const searchFeedback = document.getElementById("library-search-feedback");
+  const refreshFeedback = document.getElementById("library-refresh-feedback");
+  const refreshButtons = Array.from(
+    document.querySelectorAll("[data-library-refresh]")
+  );
   const filterButtons = Array.from(
     document.querySelectorAll("[data-library-filter]")
   );
@@ -2923,6 +3017,19 @@ async function initLibraryPage() {
       LIBRARY_FILTER_LOOKUP.get(activeFilter) ||
       LIBRARY_FILTER_LOOKUP.get("all")
     );
+  }
+
+  function setRefreshMessage(message, { isError = false } = {}) {
+    if (!refreshFeedback) return;
+    if (!message) {
+      refreshFeedback.hidden = true;
+      refreshFeedback.textContent = "";
+      refreshFeedback.classList.remove("is-error");
+      return;
+    }
+    refreshFeedback.hidden = false;
+    refreshFeedback.textContent = message;
+    refreshFeedback.classList.toggle("is-error", Boolean(isError));
   }
 
   function updateFilterButtons() {
@@ -3075,6 +3182,57 @@ async function initLibraryPage() {
   updateFilterButtons();
 
   await renderLists({ force: true });
+
+  refreshButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      const status = button.dataset.libraryRefresh;
+      if (!status) return;
+
+      const definition = getStatusDefinition(status) || {
+        label: status,
+        value: status,
+      };
+      const originalLabel = (button.textContent || "").trim() || "Refresh metadata";
+      button.disabled = true;
+      button.textContent = "Refreshing...";
+      setRefreshMessage(`Refreshing Steam metadata for ${definition.label}...`);
+
+      try {
+        const payload = await fetchJSON(`/api/library/${definition.value}/refresh`, {
+          method: "POST",
+        });
+        const updated = Number(payload?.updated || 0);
+        const errors = Array.isArray(payload?.errors) ? payload.errors.length : 0;
+
+        await fetchAndCacheGames({ force: true });
+        await renderLists({ force: true });
+
+        if (updated === 0 && errors === 0) {
+          setRefreshMessage(
+            `No games in ${definition.label} had a Steam App ID to refresh.`
+          );
+        } else if (errors > 0) {
+          const noun = updated === 1 ? "game" : "games";
+          const errorNoun = errors === 1 ? "game" : "games";
+          setRefreshMessage(
+            `Updated ${updated} ${noun} in ${definition.label}. ${errors} ${errorNoun} could not be refreshed.`,
+            { isError: true }
+          );
+        } else {
+          const noun = updated === 1 ? "game" : "games";
+          setRefreshMessage(`Updated ${updated} ${noun} in ${definition.label}.`);
+        }
+      } catch (error) {
+        setRefreshMessage(
+          error instanceof Error ? error.message : String(error),
+          { isError: true }
+        );
+      } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    });
+  });
 }
 
 async function initRankingsPage() {

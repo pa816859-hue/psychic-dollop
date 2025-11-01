@@ -15,8 +15,16 @@
     </div>
     <div class="game-detail-actions">
       <button type="button" id="game-edit-toggle">Edit details</button>
+      {% if game.steam_app_id %}
+        <button type="button" id="game-refresh-metadata">Refresh Steam metadata</button>
+      {% else %}
+        <button type="button" id="game-refresh-metadata" disabled>Refresh Steam metadata</button>
+      {% endif %}
       <button type="button" id="game-delete-button">Delete game</button>
     </div>
+    <p class="hint" id="game-refresh-message">
+      {% if not game.steam_app_id %}Add a Steam App ID to enable automatic metadata updates.{% endif %}
+    </p>
     <form id="game-edit-form" class="game-edit-form hidden" novalidate>
       <div class="game-edit-grid">
         <label class="game-edit-field" for="game-edit-title">
@@ -95,6 +103,11 @@
               <span class="tag">{{ genre }}</span>
             {% endfor %}
           </div>
+        {% endif %}
+        {% if game.price_amount is not none %}
+          <p class="game-detail-price">
+            Price: {{ (game.price_currency or 'MYR') }} {{ '%.2f'|format(game.price_amount) }}
+          </p>
         {% endif %}
         {% if game.modes %}
           <div class="tag-list tag-list-inline">
