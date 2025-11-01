@@ -1774,6 +1774,348 @@ function renderGenreSentimentComparison(root, summary) {
   canvas.appendChild(list);
 }
 
+function renderPricingInsights(root, summary) {
+  const container = root.querySelector("[data-pricing-insights]");
+  if (!container) return;
+
+  const currencyLabel = container.querySelector("[data-pricing-currency-label]");
+  const metrics = {
+    owned: container.querySelector(
+      '[data-pricing-metric="owned-spend"] .insights-card__value'
+    ),
+    backlog: container.querySelector(
+      '[data-pricing-metric="backlog-value"] .insights-card__value'
+    ),
+    wishlist: container.querySelector(
+      '[data-pricing-metric="wishlist-value"] .insights-card__value'
+    ),
+    averageHours: container.querySelector(
+      '[data-pricing-metric="avg-hours"] .insights-card__value'
+    ),
+  };
+
+  const tables = {
+    best: container.querySelector('[data-pricing-table="best-value"] .insights-table__content'),
+    underutilized: container.querySelector(
+      '[data-pricing-table="underutilized"] .insights-table__content'
+    ),
+  };
+
+  const currencyTotals = summary?.currency_totals || {};
+  const currencyKeys = Object.keys(currencyTotals);
+  const fallbackText = "No price data yet";
+
+  const setMetric = (element, valueText) => {
+    if (!element) return;
+    const placeholder = element.dataset.placeholderText || fallbackText;
+    element.textContent = valueText || placeholder;
+  };
+
+  const clearTables = (message) => {
+    Object.values(tables).forEach((section) => {
+      if (!section) return;
+      section.innerHTML = "";
+      const empty = document.createElement("p");
+      empty.className = "insights-table__empty";
+      empty.textContent = message;
+      section.appendChild(empty);
+    });
+  };
+
+  if (currencyKeys.length === 0) {
+    container.dataset.state = "empty";
+    if (currencyLabel) {
+      currencyLabel.textContent = "—";
+    }
+    Object.values(metrics).forEach((element) => setMetric(element, null));
+    clearTables("Track prices to unlock value insights.");
+    return;
+  }
+
+  const primaryCurrency = summary?.primary_currency || currencyKeys[0];
+  const currencyRecord = currencyTotals[primaryCurrency] || {};
+
+  const formatCurrencyValue = (amount) => {
+    if (typeof amount !== "number" || Number.isNaN(amount)) return null;
+    return formatPrice({ amount, currency: primaryCurrency });
+  };
+
+  const formatHoursLabel = (hours) => {
+    if (typeof hours !== "number" || hours <= 0 || Number.isNaN(hours)) return null;
+    if (hours >= 100) return `${Math.round(hours).toLocaleString()} hrs`;
+    if (hours >= 10) return `${hours.toFixed(0)} hrs`;
+    return `${hours.toFixed(1)} hrs`;
+  };
+
+  const formatPerCurrency = (value, { unit = "hrs" } = {}) => {
+    if (typeof value !== "number" || Number.isNaN(value) || value < 0) return null;
+    const precision = value >= 10 ? 1 : 2;
+    return `${value.toFixed(precision)} ${unit} / ${primaryCurrency}`;
+  };
+
+  const formatCostPerHour = (value) => {
+    if (typeof value !== "number" || value < 0 || Number.isNaN(value)) return null;
+    return `${formatPrice({ amount: value, currency: primaryCurrency })} / hr`;
+  };
+
+  const renderValueTable = (section, items, { variant }) => {
+    if (!section) return;
+    section.innerHTML = "";
+
+    if (!Array.isArray(items) || items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "insights-table__empty";
+      empty.textContent =
+        variant === "best"
+          ? "Log playtime for priced games to surface standout value."
+          : "Once you spend time on priced games, we'll flag titles that need attention.";
+      section.appendChild(empty);
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.className = "insights-table__grid insights-table__grid--pricing";
+
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    ["Game", "Hours played"].forEach((label) => {
+      const th = document.createElement("th");
+      th.scope = "col";
+      th.textContent = label;
+      headRow.appendChild(th);
+    });
+    if (variant === "best") {
+      const valueHead = document.createElement("th");
+      valueHead.scope = "col";
+      valueHead.textContent = "Value";
+      headRow.appendChild(valueHead);
+
+      const enjoymentHead = document.createElement("th");
+      enjoymentHead.scope = "col";
+      enjoymentHead.textContent = "Enjoyment";
+      headRow.appendChild(enjoymentHead);
+    } else {
+      const costHead = document.createElement("th");
+      costHead.scope = "col";
+      costHead.textContent = "Cost / hr";
+      headRow.appendChild(costHead);
+
+      const statusHead = document.createElement("th");
+      statusHead.scope = "col";
+      statusHead.textContent = "Status";
+      headRow.appendChild(statusHead);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    items.forEach((entry) => {
+      const row = document.createElement("tr");
+
+      const titleCell = document.createElement("th");
+      titleCell.scope = "row";
+      titleCell.className = "pricing-insights__cell pricing-insights__cell--title";
+
+      const titleWrap = document.createElement("div");
+      titleWrap.className = "pricing-insights__title";
+
+      const titleName = document.createElement("span");
+      titleName.className = "pricing-insights__name";
+      titleName.textContent = entry.title || "Untitled";
+      titleWrap.appendChild(titleName);
+
+      const priceLabel = formatPrice(entry.price);
+      if (priceLabel) {
+        const priceTag = document.createElement("span");
+        priceTag.className = "pricing-insights__meta";
+        priceTag.textContent = priceLabel;
+        titleWrap.appendChild(priceTag);
+      }
+
+      const statusValue = entry.status;
+      const statusLabel = statusValue ? getStatusLabel(statusValue) : null;
+      if (statusLabel) {
+        const statusTag = document.createElement("span");
+        statusTag.className = `pricing-insights__status pricing-insights__status--${statusValue}`;
+        statusTag.textContent = statusLabel;
+        titleWrap.appendChild(statusTag);
+      }
+
+      titleCell.appendChild(titleWrap);
+      row.appendChild(titleCell);
+
+      const hoursCell = document.createElement("td");
+      hoursCell.className = "pricing-insights__cell";
+      const hoursLabel = formatHoursLabel(entry.total_hours);
+      hoursCell.textContent = hoursLabel || "—";
+      row.appendChild(hoursCell);
+
+      if (variant === "best") {
+        const valueCell = document.createElement("td");
+        valueCell.className = "pricing-insights__cell";
+        const valueLabel = formatPerCurrency(entry.hours_per_currency);
+        valueCell.textContent = valueLabel || "—";
+        row.appendChild(valueCell);
+
+        const enjoymentCell = document.createElement("td");
+        enjoymentCell.className = "pricing-insights__cell";
+        const enjoymentLabel = formatPerCurrency(entry.enjoyment_per_cost, {
+          unit: "fun hrs",
+        });
+        const sentimentScore = entry.sentiment_score;
+        if (enjoymentLabel) {
+          const primaryLine = document.createElement("div");
+          primaryLine.textContent = enjoymentLabel;
+          enjoymentCell.appendChild(primaryLine);
+        }
+        if (Number.isFinite(sentimentScore)) {
+          const note = document.createElement("div");
+          note.className = "pricing-insights__note";
+          note.textContent = `${Math.round(sentimentScore)} sentiment pts`;
+          enjoymentCell.appendChild(note);
+        }
+        if (enjoymentCell.childNodes.length === 0) {
+          enjoymentCell.textContent = "—";
+        }
+        row.appendChild(enjoymentCell);
+      } else {
+        const costCell = document.createElement("td");
+        costCell.className = "pricing-insights__cell";
+        const costLabel = formatCostPerHour(entry.cost_per_hour);
+        costCell.textContent = costLabel || "—";
+        row.appendChild(costCell);
+
+        const statusCell = document.createElement("td");
+        statusCell.className = "pricing-insights__cell";
+        statusCell.textContent = statusLabel || "—";
+        row.appendChild(statusCell);
+      }
+
+      tbody.appendChild(row);
+    });
+
+    table.appendChild(tbody);
+    section.appendChild(table);
+  };
+
+  container.dataset.state = "loaded";
+  if (currencyLabel) {
+    currencyLabel.textContent = primaryCurrency;
+  }
+
+  setMetric(metrics.owned, formatCurrencyValue(currencyRecord.owned_amount));
+
+  const backlogValue = formatCurrencyValue(currencyRecord.backlog_amount);
+  const backlogCount = currencyRecord.backlog_count ?? null;
+  setMetric(
+    metrics.backlog,
+    backlogValue && Number.isFinite(backlogCount)
+      ? `${backlogValue} • ${backlogCount.toLocaleString()} game${
+          backlogCount === 1 ? "" : "s"
+        }`
+      : backlogValue
+  );
+
+  const wishlistValue = formatCurrencyValue(currencyRecord.wishlist_amount);
+  const wishlistCount = currencyRecord.wishlist_count ?? null;
+  setMetric(
+    metrics.wishlist,
+    wishlistValue && Number.isFinite(wishlistCount)
+      ? `${wishlistValue} • ${wishlistCount.toLocaleString()} title${
+          wishlistCount === 1 ? "" : "s"
+        }`
+      : wishlistValue
+  );
+
+  const avgTracked = formatHoursLabel(currencyRecord.average_tracked_hours);
+  setMetric(
+    metrics.averageHours,
+    avgTracked ? `${avgTracked} per priced title` : null
+  );
+
+  const bestEntries = summary?.value_for_money?.[primaryCurrency]?.best || [];
+  const underutilizedEntries =
+    summary?.value_for_money?.[primaryCurrency]?.underutilized || [];
+
+  renderValueTable(tables.best, bestEntries, { variant: "best" });
+  renderValueTable(tables.underutilized, underutilizedEntries, {
+    variant: "underutilized",
+  });
+
+  const backlogHighlight = container.querySelector(
+    '[data-pricing-list="backlog"]'
+  );
+  if (backlogHighlight) {
+    const backlogItems = Array.isArray(summary?.backlog?.most_expensive)
+      ? summary.backlog.most_expensive
+      : [];
+    backlogHighlight.innerHTML = "";
+    if (backlogItems.length === 0) {
+      backlogHighlight.textContent =
+        "Add price data for backlog games to spotlight the biggest investments waiting to be played.";
+    } else {
+      backlogItems.forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "pricing-insights__list-item";
+        const title = document.createElement("strong");
+        title.textContent = entry.title || "Untitled";
+        item.appendChild(title);
+
+        const priceLabel = formatPrice(entry.price);
+        const daysOwned = Number.isFinite(entry.days_owned)
+          ? `${entry.days_owned} day${entry.days_owned === 1 ? "" : "s"} owned`
+          : null;
+        const details = [priceLabel, daysOwned].filter(Boolean);
+        if (details.length > 0) {
+          const detail = document.createElement("span");
+          detail.className = "pricing-insights__detail";
+          detail.textContent = details.join(" • ");
+          item.appendChild(detail);
+        }
+        backlogHighlight.appendChild(item);
+      });
+    }
+  }
+
+  const wishlistHighlight = container.querySelector(
+    '[data-pricing-list="wishlist"]'
+  );
+  if (wishlistHighlight) {
+    const wishlistItems = Array.isArray(summary?.wishlist?.highest_interest)
+      ? summary.wishlist.highest_interest
+      : [];
+    wishlistHighlight.innerHTML = "";
+    if (wishlistItems.length === 0) {
+      wishlistHighlight.textContent =
+        "Once wishlist prices are known, we'll rank the biggest splurges and highest hype.";
+    } else {
+      wishlistItems.forEach((entry) => {
+        const item = document.createElement("li");
+        item.className = "pricing-insights__list-item";
+        const title = document.createElement("strong");
+        title.textContent = entry.title || "Untitled";
+        item.appendChild(title);
+
+        const priceLabel = formatPrice(entry.price);
+        const elo = Number.isFinite(entry.elo_rating)
+          ? `ELO ${Math.round(entry.elo_rating)}`
+          : null;
+        const createdAt = entry.created_at
+          ? formatDateForDisplay(entry.created_at)
+          : null;
+        const details = [priceLabel, elo, createdAt].filter(Boolean);
+        if (details.length > 0) {
+          const detail = document.createElement("span");
+          detail.className = "pricing-insights__detail";
+          detail.textContent = details.join(" • ");
+          item.appendChild(detail);
+        }
+        wishlistHighlight.appendChild(item);
+      });
+    }
+  }
+}
+
 function renderLifecycleSummary(root, summary) {
   if (!root) return;
 
@@ -2024,11 +2366,13 @@ async function initInsightsPage() {
   initializeEngagementControls(root);
 
   try {
-    const [summary, sentimentSummary, lifecycleSummary] = await Promise.all([
-      fetchJSON("/api/insights/genres"),
-      fetchJSON("/api/insights/genre-sentiment"),
-      fetchJSON("/api/insights/lifecycle"),
-    ]);
+    const [summary, sentimentSummary, lifecycleSummary, pricingSummary] =
+      await Promise.all([
+        fetchJSON("/api/insights/genres"),
+        fetchJSON("/api/insights/genre-sentiment"),
+        fetchJSON("/api/insights/lifecycle"),
+        fetchJSON("/api/insights/pricing"),
+      ]);
 
     state.insightBuckets = {
       metadata: summary?.bucket_metadata || {},
@@ -2062,6 +2406,7 @@ async function initInsightsPage() {
 
     renderGenreInsights(root, summary);
     renderGenreSentimentComparison(root, sentimentSummary);
+    renderPricingInsights(root, pricingSummary);
     renderLifecycleSummary(root, lifecycleSummary);
 
     await loadEngagementSummary(root, { propagateError: true });
@@ -2104,6 +2449,20 @@ async function initInsightsPage() {
       section.innerHTML = "";
       section.appendChild(errorMessage);
     });
+    const pricingSection = root.querySelector("[data-pricing-insights]");
+    if (pricingSection) {
+      pricingSection.dataset.state = "error";
+      const pricingTables = pricingSection.querySelectorAll(
+        '[data-pricing-table] .insights-table__content'
+      );
+      pricingTables.forEach((section) => {
+        const errorMessage = document.createElement("p");
+        errorMessage.className = "insights-table__error";
+        errorMessage.textContent = "Unable to load pricing insights right now.";
+        section.innerHTML = "";
+        section.appendChild(errorMessage);
+      });
+    }
     root.dataset.state = "error";
   }
 }

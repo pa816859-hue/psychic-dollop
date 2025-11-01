@@ -47,6 +47,78 @@
     </article>
   </section>
 
+  <section class="insights__pricing" aria-label="Pricing insights" data-pricing-insights>
+    <header class="insights__pricing-header">
+      <h2>Price &amp; Value Overview</h2>
+      <p>Understand how much you've invested, what remains in the backlog, and where playtime is delivering the most joy per currency spent.</p>
+      <p class="insights__pricing-note">
+        Focused on <span data-pricing-currency-label>—</span>. Update price data to switch currencies automatically.
+      </p>
+    </header>
+
+    <div class="insights__cards insights__cards--pricing" aria-label="Price metrics">
+      <article class="insights-card" data-pricing-metric="owned-spend" data-placeholder-text="Add prices to owned games to see totals">
+        <h3>Total Owned Spend</h3>
+        <p class="insights-card__value" data-placeholder-text="—">—</p>
+        <p class="insights-card__meta">Sum of all owned games with recorded prices.</p>
+      </article>
+
+      <article class="insights-card" data-pricing-metric="backlog-value" data-placeholder-text="Track backlog purchase prices to see value">
+        <h3>Backlog Value</h3>
+        <p class="insights-card__value" data-placeholder-text="—">—</p>
+        <p class="insights-card__meta">Outstanding spend tied up in unstarted games.</p>
+      </article>
+
+      <article class="insights-card" data-pricing-metric="wishlist-value" data-placeholder-text="Wishlist totals will appear here">
+        <h3>Wishlist Potential</h3>
+        <p class="insights-card__value" data-placeholder-text="—">—</p>
+        <p class="insights-card__meta">Expected cost if you picked up every wishlist title today.</p>
+      </article>
+
+      <article class="insights-card" data-pricing-metric="avg-hours" data-placeholder-text="Log playtime to see averages">
+        <h3>Avg Hours / Priced Game</h3>
+        <p class="insights-card__value" data-placeholder-text="—">—</p>
+        <p class="insights-card__meta">How much tracked play each priced title has received on average.</p>
+      </article>
+    </div>
+
+    <div class="insights__tables insights__tables--pricing" aria-label="Value leaderboards">
+      <article class="insights-table" data-pricing-table="best-value">
+        <header>
+          <h3>Best Value Right Now</h3>
+          <p>Sentiment-adjusted hours per currency for priced games you've been enjoying.</p>
+        </header>
+        <div class="insights-table__content" data-placeholder-text="Log sessions on priced games to highlight standout value."></div>
+      </article>
+
+      <article class="insights-table" data-pricing-table="underutilized">
+        <header>
+          <h3>Needs More Playtime</h3>
+          <p>Games where the cost per hour is still high compared to the time you've invested.</p>
+        </header>
+        <div class="insights-table__content" data-placeholder-text="Once you add prices and playtime we'll flag pricey underplayed titles."></div>
+      </article>
+    </div>
+
+    <div class="pricing-insights__lists" aria-label="Price callouts">
+      <article class="insights-table pricing-insights__panel">
+        <header>
+          <h3>Biggest Backlog Buys</h3>
+          <p>Highest-priced owned games still waiting for a first session.</p>
+        </header>
+        <ul class="pricing-insights__list" data-pricing-list="backlog" data-placeholder-text="Track backlog purchase prices to list your largest unplayed investments."></ul>
+      </article>
+
+      <article class="insights-table pricing-insights__panel">
+        <header>
+          <h3>Wishlist Standouts</h3>
+          <p>Top wishlist items by hype or price so you can plan your next pickup.</p>
+        </header>
+        <ul class="pricing-insights__list" data-pricing-list="wishlist" data-placeholder-text="Add prices or ELO to wishlist entries to surface priorities."></ul>
+      </article>
+    </div>
+  </section>
+
   <section class="insights__charts" aria-label="Trend visualizations">
     <div class="insights-chart insights-chart--wide" data-insights-chart="engagement" data-placeholder-text="Engagement timeline will render here">
       <header class="insights-chart__header">

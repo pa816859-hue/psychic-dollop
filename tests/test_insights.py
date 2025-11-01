@@ -7,6 +7,7 @@ from app.insights import (
     summarize_engagement_trend,
     summarize_genre_preferences,
     summarize_lifecycle_metrics,
+    summarize_price_insights,
 )
 from app.models import Game, SessionLog
 
@@ -137,6 +138,107 @@ def test_summarize_lifecycle_metrics(app_instance):
     assert aging_backlog[0]["title"] == "Lagoon Archive"
     assert aging_backlog[0]["days_waiting"] == 75
     assert aging_backlog[0]["added_date"] == "2022-11-01"
+
+
+def test_summarize_price_insights(app_instance):
+    with app_instance.app_context():
+        backlog = Game(
+            title="Chronicle Backlog",
+            status="backlog",
+            price_amount=150.0,
+            price_currency="MYR",
+            purchase_date=date(2023, 5, 1),
+            elo_rating=1625,
+        )
+        value_game = Game(
+            title="Triumph Saga",
+            status="full_clear",
+            price_amount=90.0,
+            price_currency="MYR",
+            purchase_date=date(2023, 4, 12),
+            start_date=date(2023, 4, 15),
+            finish_date=date(2023, 5, 10),
+            elo_rating=1780,
+        )
+        underused = Game(
+            title="Slow Burn",
+            status="playing",
+            price_amount=180.0,
+            price_currency="MYR",
+            purchase_date=date(2023, 4, 20),
+            elo_rating=1505,
+        )
+        wishlist = Game(
+            title="Stellar Wish",
+            status="wishlist",
+            price_amount=95.0,
+            price_currency="MYR",
+            elo_rating=1820,
+        )
+        wishlist_alt = Game(
+            title="Budget Indie",
+            status="wishlist",
+            price_amount=45.0,
+            price_currency="USD",
+            elo_rating=1510,
+        )
+
+        db.session.add_all([
+            backlog,
+            value_game,
+            underused,
+            wishlist,
+            wishlist_alt,
+        ])
+        db.session.commit()
+
+        db.session.add_all(
+            [
+                SessionLog(
+                    game_id=value_game.id,
+                    game_title=value_game.title,
+                    session_date=date(2023, 5, 20),
+                    playtime_minutes=600,
+                    sentiment="good",
+                ),
+                SessionLog(
+                    game_id=underused.id,
+                    game_title=underused.title,
+                    session_date=date(2023, 5, 22),
+                    playtime_minutes=45,
+                    sentiment="mediocre",
+                ),
+            ]
+        )
+        db.session.commit()
+
+        summary = summarize_price_insights(today=date(2023, 6, 1), top_limit=3)
+
+    assert summary["primary_currency"] == "MYR"
+
+    myr_totals = summary["currency_totals"]["MYR"]
+    assert myr_totals["owned_amount"] == pytest.approx(420.0)
+    assert myr_totals["backlog_amount"] == pytest.approx(150.0)
+    assert myr_totals["wishlist_amount"] == pytest.approx(95.0)
+    assert myr_totals["average_tracked_hours"] == pytest.approx(5.38, rel=1e-3)
+
+    backlog_watch = summary["backlog"]["most_expensive"]
+    assert backlog_watch and backlog_watch[0]["title"] == "Chronicle Backlog"
+    assert backlog_watch[0]["days_owned"] == 31
+    assert summary["backlog"]["total_priced"] == 1
+
+    wishlist_high = summary["wishlist"]["highest_interest"]
+    assert wishlist_high and wishlist_high[0]["title"] == "Stellar Wish"
+    assert summary["wishlist"]["total_priced"] == 2
+
+    best_value = summary["value_for_money"]["MYR"]["best"]
+    assert best_value and best_value[0]["title"] == "Triumph Saga"
+    expected_enjoyment = (600 / 60) / 90.0
+    assert best_value[0]["enjoyment_per_cost"] == pytest.approx(expected_enjoyment, rel=1e-6)
+
+    underutilized = summary["value_for_money"]["MYR"]["underutilized"]
+    assert underutilized and underutilized[0]["title"] == "Slow Burn"
+    assert underutilized[0]["cost_per_hour"] == pytest.approx(240.0)
 
 
 def test_summarize_engagement_trend_detects_spikes(app_instance):

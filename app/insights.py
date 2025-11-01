@@ -18,6 +18,7 @@ from .statuses import (
     INSIGHT_BUCKET_BY_STATUS,
     INSIGHT_BUCKET_DISPLAY_ORDER,
     INSIGHT_BUCKET_METADATA,
+    OWNED_STATUSES,
 )
 
 
@@ -393,6 +394,258 @@ def build_genre_interest_sentiment() -> Dict[str, Any]:
             bucket: preference_buckets.get(bucket, _BUCKET_METADATA.get(bucket, {}))
             for bucket in _INSIGHT_BUCKETS
         },
+    }
+
+
+def summarize_price_insights(
+    *, today: date | None = None, top_limit: int = 5
+) -> Dict[str, Any]:
+    """Generate pricing-focused insights across backlog and wishlist games."""
+
+    today = today or date.today()
+
+    def _init_currency_record() -> dict[str, Any]:
+        return {
+            "owned_amount": 0.0,
+            "owned_count": 0,
+            "backlog_amount": 0.0,
+            "backlog_count": 0,
+            "wishlist_amount": 0.0,
+            "wishlist_count": 0,
+            "tracked_hours": 0.0,
+            "tracked_titles": 0,
+        }
+
+    currency_totals: dict[str, dict[str, Any]] = defaultdict(_init_currency_record)
+    backlog_candidates: list[dict[str, Any]] = []
+    wishlist_candidates: list[dict[str, Any]] = []
+    priced_games: list[tuple[Game, str, float, str]] = []
+
+    games: Iterable[Game] = Game.query.all()
+    for game in games:
+        if game.price_amount is None:
+            continue
+
+        try:
+            amount = float(game.price_amount)
+        except (TypeError, ValueError):
+            continue
+        if amount < 0:
+            continue
+
+        currency = (game.price_currency or "MYR").upper()
+        status = (game.status or "").lower()
+
+        record = currency_totals[currency]
+        if status in OWNED_STATUSES:
+            record["owned_amount"] += amount
+            record["owned_count"] += 1
+
+        if status == "backlog":
+            record["backlog_amount"] += amount
+            record["backlog_count"] += 1
+            backlog_candidates.append(
+                {
+                    "id": game.id,
+                    "title": game.title,
+                    "price": {"amount": amount, "currency": currency},
+                    "purchase_date": game.purchase_date.isoformat()
+                    if game.purchase_date
+                    else None,
+                    "days_owned": (today - game.purchase_date).days
+                    if isinstance(game.purchase_date, date)
+                    else None,
+                    "elo_rating": float(game.elo_rating or 0.0),
+                }
+            )
+        elif status == "wishlist":
+            record["wishlist_amount"] += amount
+            record["wishlist_count"] += 1
+            wishlist_candidates.append(
+                {
+                    "id": game.id,
+                    "title": game.title,
+                    "price": {"amount": amount, "currency": currency},
+                    "elo_rating": float(game.elo_rating or 0.0),
+                    "created_at": game.created_at.isoformat()
+                    if isinstance(game.created_at, datetime)
+                    else None,
+                }
+            )
+
+        priced_games.append((game, currency, amount, status))
+
+    priced_game_ids = [game.id for game, _, _, _ in priced_games if game.id]
+    sessions_by_game: dict[int, list[SessionLog]] = defaultdict(list)
+    if priced_game_ids:
+        session_rows: Iterable[SessionLog] = SessionLog.query.filter(
+            SessionLog.game_id.in_(priced_game_ids)
+        ).all()
+        for session in session_rows:
+            if session.game_id:
+                sessions_by_game[int(session.game_id)].append(session)
+
+    value_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for game, currency, amount, status in priced_games:
+        sessions = sessions_by_game.get(game.id or -1, [])
+        total_minutes = 0.0
+        for session in sessions:
+            try:
+                minutes = float(session.playtime_minutes or 0)
+            except (TypeError, ValueError):
+                minutes = 0.0
+            if minutes > 0:
+                total_minutes += minutes
+
+        total_hours = total_minutes / 60.0
+        value_entry: dict[str, Any] = {
+            "id": game.id,
+            "title": game.title,
+            "status": status,
+            "price": {"amount": amount, "currency": currency},
+            "total_hours": total_hours,
+            "hours_per_currency": None,
+            "cost_per_hour": None,
+            "enjoyment_per_cost": None,
+            "sentiment_score": None,
+        }
+
+        if total_hours > 0:
+            hours_per_currency = (total_hours / amount) if amount > 0 else None
+            cost_per_hour = (amount / total_hours) if total_hours > 0 else None
+            value_entry["hours_per_currency"] = hours_per_currency
+            value_entry["cost_per_hour"] = cost_per_hour
+
+            sentiment_result = compute_weighted_sentiment(sessions)
+            sentiment_score = sentiment_result.weighted_score
+            value_entry["sentiment_score"] = sentiment_score
+
+            if amount > 0:
+                if sentiment_score is not None:
+                    enjoyment_factor = max(min(sentiment_score / 100.0, 1.0), 0.0)
+                    value_entry["enjoyment_per_cost"] = enjoyment_factor * hours_per_currency
+                else:
+                    value_entry["enjoyment_per_cost"] = hours_per_currency
+
+            record = currency_totals[currency]
+            record["tracked_hours"] += total_hours
+            record["tracked_titles"] += 1
+
+        value_map[currency].append(value_entry)
+
+    for currency, record in currency_totals.items():
+        owned_count = record.get("owned_count", 0) or 0
+        backlog_count = record.get("backlog_count", 0) or 0
+        wishlist_count = record.get("wishlist_count", 0) or 0
+
+        record["average_owned_price"] = (
+            record["owned_amount"] / owned_count if owned_count else None
+        )
+        record["average_backlog_price"] = (
+            record["backlog_amount"] / backlog_count if backlog_count else None
+        )
+        record["average_wishlist_price"] = (
+            record["wishlist_amount"] / wishlist_count if wishlist_count else None
+        )
+        tracked_titles = record.get("tracked_titles", 0) or 0
+        record["average_tracked_hours"] = (
+            record["tracked_hours"] / tracked_titles if tracked_titles else None
+        )
+
+    def _best_sort_key(entry: dict[str, Any]) -> tuple[float, float]:
+        enjoyment = entry.get("enjoyment_per_cost")
+        hours_per_currency = entry.get("hours_per_currency") or 0.0
+        if enjoyment is None:
+            enjoyment = hours_per_currency
+        return (float(enjoyment), float(hours_per_currency))
+
+    def _worst_sort_key(entry: dict[str, Any]) -> tuple[float, float]:
+        cost_per_hour = entry.get("cost_per_hour")
+        total_hours = entry.get("total_hours") or 0.0
+        if cost_per_hour is None:
+            return (-float("inf"), -float(total_hours))
+        return (float(cost_per_hour), -float(total_hours))
+
+    value_summary: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for currency, entries in value_map.items():
+        best_candidates = [
+            entry
+            for entry in entries
+            if entry.get("hours_per_currency")
+            and (entry.get("total_hours") or 0) >= 1.0
+        ]
+        underutilized_candidates = [
+            entry
+            for entry in entries
+            if entry.get("cost_per_hour") is not None
+            and entry.get("status") in OWNED_STATUSES
+        ]
+
+        best_entries = sorted(
+            best_candidates, key=_best_sort_key, reverse=True
+        )[: max(0, int(top_limit))]
+        underutilized_entries = sorted(
+            underutilized_candidates, key=_worst_sort_key, reverse=True
+        )[: max(0, int(top_limit))]
+
+        value_summary[currency] = {
+            "best": best_entries,
+            "underutilized": underutilized_entries,
+        }
+
+    backlog_candidates.sort(
+        key=lambda item: (item["price"]["amount"], item.get("days_owned") or -1),
+        reverse=True,
+    )
+    wishlist_candidates.sort(
+        key=lambda item: (item["price"]["amount"], item.get("elo_rating", 0.0)),
+        reverse=True,
+    )
+
+    wishlist_interest = sorted(
+        wishlist_candidates,
+        key=lambda item: item.get("elo_rating", 0.0),
+        reverse=True,
+    )
+
+    resolved_totals = {
+        currency: {
+            key: (round(value, 2) if isinstance(value, float) else value)
+            for key, value in record.items()
+        }
+        for currency, record in currency_totals.items()
+    }
+
+    primary_currency = None
+    if resolved_totals:
+        primary_currency = max(
+            resolved_totals.items(),
+            key=lambda item: (
+                item[1].get("owned_amount", 0.0),
+                item[1].get("backlog_amount", 0.0),
+                item[1].get("wishlist_amount", 0.0),
+            ),
+        )[0]
+
+    return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "currency_totals": resolved_totals,
+        "primary_currency": primary_currency,
+        "backlog": {
+            "most_expensive": backlog_candidates[: max(0, int(top_limit))],
+            "total_priced": sum(
+                record.get("backlog_count", 0) for record in resolved_totals.values()
+            ),
+        },
+        "wishlist": {
+            "most_expensive": wishlist_candidates[: max(0, int(top_limit))],
+            "highest_interest": wishlist_interest[: max(0, int(top_limit))],
+            "total_priced": sum(
+                record.get("wishlist_count", 0) for record in resolved_totals.values()
+            ),
+        },
+        "value_for_money": value_summary,
     }
 
 
